@@ -28,8 +28,11 @@ if command -v sdkmanager > /dev/null; then
     fi
 fi
 
+# Only arm64-v8a is built (see android/app/build.gradle abiFilters), so the
+# x64-android triplet is skipped: vcpkg's OpenSSL cannot assemble its x86
+# SM3/SM4 code with NDK 29, and installing it doubled setup time for nothing.
 pushd "$repo_root" > /dev/null
-for triplet in arm64-android x64-android; do
+for triplet in arm64-android; do
     vcpkg install --triplet "$triplet"
 done
 popd > /dev/null

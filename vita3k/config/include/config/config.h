@@ -155,7 +155,7 @@ using PhysicalKeyCode = input::PhysicalKeyCode;
     code(std::string, "custom-driver-name", "", custom_driver_name)                                     \
     code(bool, "turbo-mode", false, turbo_mode)                                                         \
     code(int, "gpu-idx", 0, gpu_idx)                                                                    \
-    code(bool, "high-accuracy", true, high_accuracy)                                                   \
+    code(bool, "high-accuracy", false, high_accuracy)                                                  \
     code(std::string, "tu-debug", "", tu_debug)                                                     \
     code(bool, "disable-raster-order", false, disable_raster_order)                                \
     code(bool, "disable-programmable-blending", false, disable_programmable_blending)               \
@@ -169,7 +169,7 @@ using PhysicalKeyCode = input::PhysicalKeyCode;
     code(int, "anisotropic-filtering", 1, anisotropic_filtering)                                        \
     code(bool, "texture-cache", true, texture_cache)                                                    \
     code(bool, "async-pipeline-compilation", false, async_pipeline_compilation)                          \
-    code(bool, "accurate-thread-scheduling", true, accurate_thread_scheduling)                          \
+    code(bool, "accurate-thread-scheduling", false, accurate_thread_scheduling)                          \
     code(int, "preempt-on-wake-us", 1000, preempt_on_wake_us)                                             \
     code(int, "guest-cores", 3, guest_cores)  /* the Vita gives an application three of its four cores */ \
     code(bool, "show-compile-shaders", true, show_compile_shaders)                                      \

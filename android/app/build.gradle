@@ -41,11 +41,14 @@ android {
 
 	defaultConfig {
 		// namespace stays org.vita3k.emulator: it is the Java package the JNI symbols are bound to
-		applicationId = "org.vita3kplus.emulator"
+		// Coexisting build: ".uc" suffix isolates the APK id, the data dir
+		// (/sdcard/Android/data/<id>/files) and the launcher entry, so this
+		// installs side by side with stock Vita3K+.
+		applicationId = "org.vita3kplus.emulator.uc"
 		minSdk = 28
 		targetSdk = 35
 		versionCode = appVerHi * 100 + appVerMid * 10 + appVerLo
-		versionName = appVersionName
+		versionName = appVersionName + "-uc"
 
 		ndk {
 			// x86_64 is emulator-only and broken here: vcpkg OpenSSL cannot assemble its x86 SM3/SM4 code with the NDK.
