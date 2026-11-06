@@ -91,7 +91,10 @@ bool Atrac9DecoderState::send(const uint8_t *data, uint32_t size) {
 
     int decode_used = 0;
 
-    const int res = Atrac9DecodeBounded(decoder_handle, data, superframe_data_left, reinterpret_cast<short *>(result.data()), &decode_used);
+    // Atrac9DecodeBounded() does not exist in Vita3K/LibAtrac9 -- it was a local
+    // uncommitted patch of the author's, and upstream Vita3K-Plus master calls the
+    // stock Atrac9Decode() on this very line, so do the same here.
+    const int res = Atrac9Decode(decoder_handle, data, reinterpret_cast<short *>(result.data()), &decode_used);
     if (res != At9Status::ERR_SUCCESS) {
         static uint64_t failure_count = 0;
         ++failure_count;
