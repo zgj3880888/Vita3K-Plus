@@ -136,6 +136,12 @@ jobs:
             exit 1
           fi
           python3 ci/check_signature.py "$APK" || true
+          # MT Manager's document provider has to survive the build, otherwise
+          # the app stops showing up in MT's file browser without root.
+          "$BT/aapt2" dump xmltree "$APK" --file AndroidManifest.xml | grep -q MTDataFilesProvider \
+            || { echo "::error::the MT document provider is missing from the manifest"; exit 1; }
+          unzip -l "$APK" | grep -q "classes2.dex" \
+            || { echo "::error::classes2.dex is missing"; exit 1; }
           echo "OK: $PKG installs alongside org.vita3kplus.emulator"
 
       - name: Assert the signing certificate did not change
