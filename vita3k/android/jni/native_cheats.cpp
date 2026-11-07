@@ -246,4 +246,29 @@ Java_org_vita3k_emulator_NativeLib_getCheatDirectory(JNIEnv *env, jclass) {
     return new_string(env, emuenv->cheat_path.generic_string());
 }
 
+// One line the cheat screen shows under the folder path, so that "I put a file there and the list
+// stays empty" can be told apart from "the file is there but its name carries no title id".
+JNIEXPORT jstring JNICALL
+Java_org_vita3k_emulator_NativeLib_getCheatScan(JNIEnv *env, jclass) {
+    auto *emuenv = get_emuenv();
+    if (!emuenv)
+        return new_string(env, std::string());
+
+    const cheat::CheatScan scan = cheat::scan_cheat_folder(emuenv->cheat_path);
+
+    std::string summary = std::to_string(scan.candidates) + " file(s) found, "
+        + std::to_string(scan.recognised) + " named after a title id";
+    if (!scan.unrecognised.empty()) {
+        summary += ". Ignored: ";
+        for (size_t i = 0; i < scan.unrecognised.size(); ++i) {
+            if (i != 0)
+                summary += ", ";
+            summary += scan.unrecognised[i];
+        }
+        summary += " (the name has to be the nine character title id, like PCSF00403.psv)";
+    }
+
+    return new_string(env, summary);
+}
+
 } // extern "C"

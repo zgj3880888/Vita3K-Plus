@@ -1,8 +1,13 @@
 package org.vita3k.emulator.ui.screens.settings
 
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +37,61 @@ import org.vita3k.emulator.R
 import org.vita3k.emulator.data.NativeCheatEntry
 import org.vita3k.emulator.data.NativeCheatFile
 import org.vita3k.emulator.data.VitaDocumentsProvider
+import java.io.File
+
+/** The nine characters that identify a game, anywhere in a file name. */
+private val titleIdInName = Regex("([A-Za-z]{4}[0-9]{5})")
+
+/**
+ * Name to store an imported file under. A collection keeps its own name because `.txt` and `.db`
+ * may hold every game behind `_S` lines, so there is no single title id to rename it after;
+ * anything else is renamed after the title id found in its name, which is what the loader matches on.
+ */
+private fun importedCheatName(source: String): String? {
+    val extension = source.substringAfterLast('.', "").lowercase()
+    if (extension == "txt" || extension == "db")
+        return source
+
+    val titleId = titleIdInName.find(source)?.groupValues?.get(1)?.uppercase() ?: return null
+    return "$titleId.psv"
+}
+
+private fun displayNameOf(context: Context, uri: Uri): String? {
+    val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
+    context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) {
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0) {
+                val name = cursor.getString(index)
+                if (!name.isNullOrBlank())
+                    return name
+            }
+        }
+    }
+    return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+}
+
+// The picker returns a content:// uri anywhere on the device, which is how a file gets into the
+// cheats folder on Android 11 and later: Android/data is not reachable from a file manager.
+private fun importCheatFile(context: Context, uri: Uri, directory: String): String? {
+    if (directory.isBlank())
+        return null
+
+    val source = displayNameOf(context, uri) ?: return null
+    val target = importedCheatName(source) ?: return null
+
+    val folder = File(directory)
+    if (!folder.isDirectory && !folder.mkdirs())
+        return null
+
+    return runCatching {
+        val input = context.contentResolver.openInputStream(uri) ?: return@runCatching null
+        input.use { sourceStream ->
+            File(folder, target).outputStream().use { sink -> sourceStream.copyTo(sink) }
+        }
+        target
+    }.getOrNull()
+}
 
 /**
  * Cheat manager shown in the Android settings screen.
@@ -56,6 +116,7 @@ internal fun CheatsSettingsSection(
     var entries by remember { mutableStateOf<List<NativeCheatEntry>>(emptyList()) }
     var entriesLoading by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
+    var scan by remember { mutableStateOf("") }
 
     // Reading the folder parses every cheat file, so it never runs on the composition thread.
     suspend fun refreshFiles() {
@@ -66,8 +127,12 @@ internal fun CheatsSettingsSection(
         val path = withContext(Dispatchers.IO) {
             runCatching { NativeLib.getCheatDirectory() }.getOrDefault("")
         }
+        val summary = withContext(Dispatchers.IO) {
+            runCatching { NativeLib.getCheatScan() }.getOrDefault("")
+        }
         files = loaded
         directory = path
+        scan = summary
         loading = false
         if (expanded != null && loaded.none { it.titleId == expanded }) {
             expanded = null
@@ -116,6 +181,27 @@ internal fun CheatsSettingsSection(
     val brokenTotal = files.sumOf { it.broken }
     val title = stringResource(R.string.settings_cheats_title)
 
+    // Android/data cannot be pasted into from a file manager since Android 11, so the picker is the
+    // only way in on most devices: the file is copied straight into the cheats folder.
+    val importFailed = stringResource(R.string.settings_cheats_import_failed)
+    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null)
+            return@rememberLauncherForActivityResult
+
+        busy = true
+        failure = null
+        scope.launch {
+            val imported = withContext(Dispatchers.IO) { importCheatFile(context, uri, directory) }
+            busy = false
+            if (imported == null) {
+                Toast.makeText(context, importFailed, Toast.LENGTH_LONG).show()
+            } else {
+                Toast.makeText(context, context.getString(R.string.settings_cheats_imported, imported), Toast.LENGTH_LONG).show()
+                refreshFiles()
+            }
+        }
+    }
+
     SettingsSectionCard(
         title = title,
         summary = if (files.isEmpty()) {
@@ -137,6 +223,9 @@ internal fun CheatsSettingsSection(
                 stringResource(R.string.settings_cheats_folder, directory)
             }
         )
+
+        if (scan.isNotBlank())
+            SettingsNote(text = stringResource(R.string.settings_cheats_scan, scan))
 
         val browseTitle = stringResource(R.string.settings_cheats_browse)
         val browseUnavailable = stringResource(R.string.settings_cheats_browse_unavailable)
@@ -169,6 +258,14 @@ internal fun CheatsSettingsSection(
             actionLabel = refreshLabel,
             onActionClick = { scope.launch { refreshFiles() } },
             actionEnabled = !loading && !busy,
+            onShowHelp = onShowHelp
+        )
+
+        SettingsActionRow(
+            title = stringResource(R.string.settings_cheats_import),
+            value = stringResource(R.string.settings_cheats_import_value),
+            onClick = { importPicker.launch(arrayOf("*/*")) },
+            enabled = !busy && directory.isNotBlank(),
             onShowHelp = onShowHelp
         )
 

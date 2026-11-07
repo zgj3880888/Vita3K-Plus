@@ -99,9 +99,22 @@ struct CheatGame {
     fs::path path;
 };
 
+// What a walk of the cheats folder saw, shown by the Android cheat screen so that a file the user
+// dropped in can be told apart from one whose name does not identify a game.
+struct CheatScan {
+    // `.psv`, `.txt` and `.db` files found at any depth.
+    size_t candidates = 0;
+    // Of those, the ones a title id could be read from (by file name or by a `_S` line).
+    size_t recognised = 0;
+    // File names of the first few that could not, for the message shown to the user.
+    std::vector<std::string> unrecognised;
+};
+
 fs::path find_cheat_file(const fs::path &cheats_dir, const std::string &title_id);
 
 std::vector<CheatGame> list_cheat_games(const fs::path &cheats_dir);
+
+CheatScan scan_cheat_folder(const fs::path &cheats_dir);
 
 // Parse a cheat file. A malformed line marks its cheat as broken, it never aborts the parsing.
 CheatFile parse_cheat_file(const fs::path &path, const std::string &title_id);

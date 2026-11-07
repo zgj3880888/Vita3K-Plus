@@ -377,6 +377,11 @@
     <string name="settings_cheats_entry_desc">%1$d code line(s). Shown under the name is the first one, which usually holds the address the cheat writes to.</string>
     <string name="settings_cheats_takes_effect">Changes apply immediately while the game is running, otherwise at the next boot. The game may overwrite a value after the first second, which is why codes are re-applied every frame.</string>
     <string name="settings_cheats_write_failed">Could not write the cheat file. It may be read-only or have been changed on disk since the list was loaded.</string>
+    <string name="settings_cheats_scan">Folder walk: %1$s</string>
+    <string name="settings_cheats_import">Import cheat file</string>
+    <string name="settings_cheats_import_value">Pick a .psv from anywhere on the device; it is copied into the cheats folder and renamed after the title id in its name</string>
+    <string name="settings_cheats_imported">Imported as %1$s</string>
+    <string name="settings_cheats_import_failed">That file was not imported. Its name has to contain the nine character title id of a game, for example PCSF00403.psv.</string>
 
     <!-- Settings — Core tab -->
     <string name="settings_modules_mode">Module Loading Mode</string>

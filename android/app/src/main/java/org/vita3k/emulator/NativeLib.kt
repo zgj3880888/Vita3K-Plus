@@ -146,6 +146,8 @@ object NativeLib {
     external fun setAllCheatsEnabled(titleId: String, enabled: Boolean): Boolean
     /** Returns the folder cheat files are read from. */
     external fun getCheatDirectory(): String
+    /** Summarises what the recursive walk of the cheats folder saw, for troubleshooting an empty list. */
+    external fun getCheatScan(): String
 
     // --- Running app session ---
     /** Blocks or releases gameplay input without changing the native pause state. */

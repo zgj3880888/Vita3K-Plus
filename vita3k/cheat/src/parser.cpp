@@ -115,6 +115,20 @@ bool is_title_id(std::string_view name) {
         && std::all_of(name.begin() + 4, name.end(), [](char c) { return std::isdigit(static_cast<unsigned char>(c)); });
 }
 
+// The nine leading characters are what identifies the game, so `PCSF00403 (1).psv` and
+// `PCSE00465-mp.psv` still count: file managers and browsers append that kind of text on their own.
+std::string title_id_from_stem(const std::string &stem) {
+    if (is_title_id(stem))
+        return stem;
+    if ((stem.size() > 9) && is_title_id(std::string_view(stem).substr(0, 9)))
+        return stem.substr(0, 9);
+    return {};
+}
+
+std::string title_id_of_path(const fs::path &path) {
+    return title_id_from_stem(string_utils::toupper(fs_utils::path_to_utf8(path.stem())));
+}
+
 // The game name of a `_S` line or a `# <title id> <name>` comment, without the title id.
 std::string name_after_title_id(std::string_view text, const std::string &title_id) {
     std::string rest = string_utils::trim_copy(text);
@@ -134,6 +148,36 @@ std::vector<std::string> read_lines(const fs::path &path) {
     while (std::getline(stream, raw))
         lines.push_back(std::move(raw));
     return lines;
+}
+
+// The VitaCheat repository ships its files under `db/`, so a tree is the normal layout and a one
+// level scan of the cheats folder finds nothing. The depth is capped so a stray symlink cannot turn
+// this into a walk of the whole card.
+constexpr int max_scan_depth = 4;
+
+void collect_cheat_files(const fs::path &dir, std::vector<fs::path> &files, int depth = 0) {
+    if (depth > max_scan_depth)
+        return;
+
+    boost::system::error_code ec;
+    fs::directory_iterator it(dir, ec);
+    for (; !ec && (it != fs::directory_iterator()); it.increment(ec)) {
+        const fs::path &path = it->path();
+        boost::system::error_code status_ec;
+        if (fs::is_directory(path, status_ec)) {
+            // `.git` and friends never hold a database and would be a large walk.
+            const std::string name = fs_utils::path_to_utf8(path.filename());
+            if (name.empty() || (name.front() == '.'))
+                continue;
+
+            collect_cheat_files(path, files, depth + 1);
+            continue;
+        }
+        if (fs::is_regular_file(path, status_ec))
+            files.push_back(path);
+    }
+    if (ec)
+        LOG_WARN("Failed to list cheat folder {}: {}", dir, ec.message());
 }
 
 // Written next to the file then renamed over it, so that a failed write never truncates the database.
@@ -195,26 +239,30 @@ fs::path find_cheat_file(const fs::path &cheats_dir, const std::string &title_id
         return {};
 
     const auto wanted = string_utils::toupper(title_id);
+    std::vector<fs::path> files;
+    collect_cheat_files(cheats_dir, files);
+
+    std::vector<fs::path> loosely_named;
     std::vector<fs::path> databases;
-
-    fs::directory_iterator it(cheats_dir, ec);
-    for (; !ec && (it != fs::directory_iterator()); it.increment(ec)) {
-        const fs::path &path = it->path();
-        boost::system::error_code status_ec;
-        if (!fs::is_regular_file(path, status_ec))
-            continue;
-
+    for (const auto &path : files) {
         const auto filename = string_utils::toupper(fs_utils::path_to_utf8(path.filename()));
         // The databases ship `<title id>.psv`, but plain `.txt` files are common too.
         if ((filename == wanted + ".PSV") || (filename == wanted + ".TXT"))
             return path;
 
         // `cheat.db` and the like hold every game in one file, keyed by `_S <title id>`.
-        if (is_database_name(filename))
+        if (is_database_name(filename)) {
             databases.push_back(path);
+            continue;
+        }
+
+        // A name the user edited or a browser renamed, e.g. `PCSF00403 (1).psv`.
+        if (title_id_of_path(path) == wanted)
+            loosely_named.push_back(path);
     }
-    if (ec)
-        LOG_WARN("Failed to list cheat folder {}: {}", cheats_dir, ec.message());
+
+    if (!loosely_named.empty())
+        return loosely_named.front();
 
     // Reading those is only worth it once no file is named after the title.
     for (const auto &database : databases) {
@@ -231,34 +279,42 @@ std::vector<CheatGame> list_cheat_games(const fs::path &cheats_dir) {
         return {};
 
     std::vector<fs::path> files;
-    for (fs::directory_iterator it(cheats_dir, ec); !ec && (it != fs::directory_iterator()); it.increment(ec)) {
-        boost::system::error_code status_ec;
-        if (fs::is_regular_file(it->path(), status_ec))
-            files.push_back(it->path());
+    collect_cheat_files(cheats_dir, files);
+
+    std::vector<fs::path> named;
+    for (const auto &path : files) {
+        const auto filename = string_utils::toupper(fs_utils::path_to_utf8(path.filename()));
+        if (filename.ends_with(".PSV") || filename.ends_with(".TXT"))
+            named.push_back(path);
     }
-    if (ec)
-        LOG_WARN("Failed to list cheat folder {}: {}", cheats_dir, ec.message());
+
+    // A file named exactly after the title goes first, so that `PCSF00403.psv` wins over
+    // `PCSF00403 (1).psv` instead of the directory order deciding.
+    std::stable_sort(named.begin(), named.end(), [](const fs::path &left, const fs::path &right) {
+        const auto left_stem = string_utils::toupper(fs_utils::path_to_utf8(left.stem()));
+        const auto right_stem = string_utils::toupper(fs_utils::path_to_utf8(right.stem()));
+        return (left_stem.size() == 9) && (right_stem.size() != 9);
+    });
 
     std::map<std::string, CheatGame> games;
 
     // Same precedence as find_cheat_file(): a file named after the game first, then the first database.
-    for (const auto &path : files) {
-        const auto filename = string_utils::toupper(fs_utils::path_to_utf8(path.filename()));
-        const auto stem = string_utils::toupper(fs_utils::path_to_utf8(path.stem()));
-        if (!(filename.ends_with(".PSV") || filename.ends_with(".TXT")) || !is_title_id(stem))
+    for (const auto &path : named) {
+        const auto title_id = title_id_of_path(path);
+        if (title_id.empty() || games.contains(title_id))
             continue;
 
-        CheatGame game{ .title_id = stem, .path = path };
+        CheatGame game{ .title_id = title_id, .path = path };
         for (const auto &raw : read_lines(path)) {
             const std::string line = clean_line(raw);
             if (is_comment(line)) {
-                game.name = name_after_title_id(std::string_view(line).substr(line.starts_with("//") ? 2 : 1), stem);
+                game.name = name_after_title_id(std::string_view(line).substr(line.starts_with("//") ? 2 : 1), title_id);
                 break;
             }
             if (!line.empty())
                 break;
         }
-        games.emplace(stem, std::move(game));
+        games.emplace(title_id, std::move(game));
     }
 
     for (const auto &path : files) {
@@ -281,6 +337,35 @@ std::vector<CheatGame> list_cheat_games(const fs::path &cheats_dir) {
     for (auto &[_, game] : games)
         result.push_back(std::move(game));
     return result;
+}
+
+CheatScan scan_cheat_folder(const fs::path &cheats_dir) {
+    CheatScan scan;
+
+    boost::system::error_code ec;
+    if (!fs::is_directory(cheats_dir, ec))
+        return scan;
+
+    std::vector<fs::path> files;
+    collect_cheat_files(cheats_dir, files);
+
+    for (const auto &path : files) {
+        const auto filename = string_utils::toupper(fs_utils::path_to_utf8(path.filename()));
+        if (!(filename.ends_with(".PSV") || filename.ends_with(".TXT") || filename.ends_with(".DB")))
+            continue;
+
+        ++scan.candidates;
+        // Only a `.psv` has to carry the title id in its name: `.txt` and `.db` may hold a whole
+        // collection keyed by `_S` lines instead, so they count as usable on their own.
+        if (!title_id_of_path(path).empty() || filename.ends_with(".TXT") || filename.ends_with(".DB")) {
+            ++scan.recognised;
+            continue;
+        }
+        if (scan.unrecognised.size() < 8)
+            scan.unrecognised.push_back(fs_utils::path_to_utf8(path.filename()));
+    }
+
+    return scan;
 }
 
 CheatFile parse_cheat_file(const fs::path &path, const std::string &title_id) {
