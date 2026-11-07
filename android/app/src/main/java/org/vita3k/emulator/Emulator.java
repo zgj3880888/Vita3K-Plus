@@ -22,9 +22,13 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.RelativeLayout;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultRegistry;
+import androidx.activity.result.ActivityResultRegistryOwner;
+import androidx.activity.result.contract.ActivityResultContract;
 import androidx.annotation.Keep;
 import androidx.compose.ui.platform.ComposeView;
 import androidx.core.app.ActivityCompat;
+import androidx.core.app.ActivityOptionsCompat;
 import androidx.core.content.pm.ShortcutInfoCompat;
 import androidx.core.content.pm.ShortcutManagerCompat;
 import androidx.core.graphics.drawable.IconCompat;
@@ -70,7 +74,8 @@ import org.vita3k.emulator.ui.viewmodel.EmulationSessionViewModel;
 import org.vita3k.emulator.ui.viewmodel.SettingsViewModel;
 
 public class Emulator extends SDLActivity
-        implements InputManager.InputDeviceListener, LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner
+        implements InputManager.InputDeviceListener, LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner,
+        ActivityResultRegistryOwner
 {
     private static final String TAG = "Vita3K";
     private static final long IME_RESTORE_DELAY_MS = 250L;
@@ -88,6 +93,25 @@ public class Emulator extends SDLActivity
     private final SavedStateRegistryController savedStateRegistryController =
             SavedStateRegistryController.create(this);
     private final ViewModelStore composeViewModelStore = new ViewModelStore();
+    // Compose asks its host for an ActivityResultRegistry as soon as a screen uses a picker. This is
+    // a plain SDL activity rather than a ComponentActivity, so nothing provides one, and the cheat
+    // screen used to fail its composition the moment it was opened from the pause menu: the picker
+    // it creates for "import a cheat file" was the first one in the app to need it.
+    private final ActivityResultRegistry composeActivityResultRegistry = new ActivityResultRegistry() {
+        @Override
+        public <I, O> void onLaunch(int requestCode, ActivityResultContract<I, O> contract,
+                                    I input, ActivityOptionsCompat options) {
+            final Intent intent = contract.createIntent(Emulator.this, input);
+            if (intent == null) {
+                return;
+            }
+            if (options != null) {
+                Emulator.this.startActivityForResult(intent, requestCode, options.toBundle());
+            } else {
+                Emulator.this.startActivityForResult(intent, requestCode);
+            }
+        }
+    };
     private String currentGameId = "";
     private EmuSurface mSurface;
     private ComposeView imeOverlayView;
@@ -1336,6 +1360,9 @@ public class Emulator extends SDLActivity
                 break;
             }
             default:
+                // Anything else belongs to a Compose launcher; the codes it hands out start at
+                // 0x10000, so they cannot collide with the file dialog codes above.
+                composeActivityResultRegistry.dispatchResult(requestCode, resultCode, data);
                 break;
         }
     }
@@ -1513,6 +1540,11 @@ public class Emulator extends SDLActivity
     @Override
     public ViewModelStore getViewModelStore() {
         return composeViewModelStore;
+    }
+
+    @Override
+    public ActivityResultRegistry getActivityResultRegistry() {
+        return composeActivityResultRegistry;
     }
 
     private void handleImeVisibilityChanged(boolean visible) {

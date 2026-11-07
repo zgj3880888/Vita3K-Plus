@@ -138,12 +138,18 @@ object NativeLib {
     // --- Cheats ---
     /** Returns one entry per game that has a cheat file in the cheats folder. */
     external fun getCheatFiles(): Array<NativeCheatFile>
+    /** Returns the entry of one game, or null when the folder holds no cheat file for it; the in-game panel asks for one game only. */
+    external fun getCheatFile(titleId: String): NativeCheatFile?
     /** Returns the cheats of one game, in file order. */
     external fun getCheats(titleId: String): Array<NativeCheatEntry>
     /** Turns one cheat on or off by rewriting its `_V0`/`_V1` marker; also applies it live when that game is running. */
     external fun setCheatEnabled(titleId: String, index: Int, enabled: Boolean): Boolean
     /** Turns every cheat of a game on or off; broken cheats always stay off. */
     external fun setAllCheatsEnabled(titleId: String, enabled: Boolean): Boolean
+    /** Whether the engine may run cheat codes at all. */
+    external fun getCheatsEnabled(): Boolean
+    /** Turns the master switch on or off for the running game and stores the choice in the config. */
+    external fun setCheatsEnabled(enabled: Boolean): Boolean
     /** Returns the folder cheat files are read from. */
     external fun getCheatDirectory(): String
     /** Summarises what the recursive walk of the cheats folder saw, for troubleshooting an empty list. */

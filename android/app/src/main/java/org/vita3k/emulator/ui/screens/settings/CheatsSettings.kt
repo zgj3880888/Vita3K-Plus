@@ -8,6 +8,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.widget.Toast
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -126,11 +127,18 @@ private fun importCheatFile(context: Context, uri: Uri, directory: String): Stri
 }
 
 /**
- * Cheat manager shown in the Android settings screen.
+ * Cheat manager. Shown in two very different places, which is why it asks the native side for
+ * different things in each:
  *
- * The Qt build toggles cheats through a live `CheatState`; here the screen is normally open with no
- * game running, so every switch rewrites the `_V0`/`_V1` marker of the `*.psv` file on disk and the
- * native side re-applies it immediately when that game happens to be the running one.
+ * - from the settings screen, no game runs: every cheat file of the folder is listed, and a switch
+ *   only rewrites the `_V0`/`_V1` marker for the next boot;
+ * - from the pause menu, the game runs: only that game is listed, and a switch flips the flag of the
+ *   copy the display thread replays every vblank, so it takes effect at the next frame while the
+ *   file is still updated so the choice survives a restart.
+ *
+ * The master switch is the engine wide gate the desktop build has. With it off, no code is written
+ * to memory at all, which is the fastest way to compare "the game is broken" against "the cheat did
+ * it" without leaving the game.
  */
 @Composable
 internal fun CheatsSettingsSection(
@@ -139,6 +147,14 @@ internal fun CheatsSettingsSection(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+
+    // Non-null means this panel knows a game. Only a live session makes it the panel of that game:
+    // the settings screen also carries a title id when it edits one game's config, and then nothing
+    // runs to apply a switch to.
+    val runningId = titleId?.takeIf { it.isNotBlank() }
+    val inGame = remember(runningId) {
+        runningId != null && runCatching { NativeLib.isAppRunning() }.getOrDefault(false)
+    }
 
     var directory by remember { mutableStateOf("") }
     var files by remember { mutableStateOf<List<NativeCheatFile>>(emptyList()) }
@@ -153,21 +169,33 @@ internal fun CheatsSettingsSection(
     var diskFiles by remember { mutableStateOf<List<String>>(emptyList()) }
     var diagnosis by remember { mutableStateOf("") }
     var diagnosing by remember { mutableStateOf(false) }
+    var masterEnabled by remember(inGame) { mutableStateOf(true) }
+    var masterKnown by remember(inGame) { mutableStateOf(false) }
 
-    // Reading the folder parses every cheat file, so it never runs on the composition thread.
+    // Reading the folder parses every cheat file, so it never runs on the composition thread. In the
+    // pause menu only the running game is asked for: a phone with a 700 file database would parse
+    // all of it on every visit otherwise, with the game still running.
     suspend fun refreshFiles() {
         loading = true
         val loaded = withContext(Dispatchers.IO) {
-            runCatching { NativeLib.getCheatFiles().toList() }.getOrDefault(emptyList())
+            runCatching {
+                val id = if (inGame) runningId else null
+                if (id != null) {
+                    listOfNotNull(NativeLib.getCheatFile(id))
+                } else {
+                    NativeLib.getCheatFiles().toList()
+                }
+            }.getOrDefault(emptyList())
         }
         val path = withContext(Dispatchers.IO) {
             runCatching { NativeLib.getCheatDirectory() }.getOrDefault("")
         }
         val summary = withContext(Dispatchers.IO) {
-            runCatching { NativeLib.getCheatScan() }.getOrDefault("")
+            // Only the folder view shows it, and it walks every file name of the folder.
+            if (inGame) "" else runCatching { NativeLib.getCheatScan() }.getOrDefault("")
         }
         val onDisk = withContext(Dispatchers.IO) {
-            if (loaded.isEmpty()) {
+            if (loaded.isEmpty() && !inGame) {
                 runCatching { listCheatFilesOnDisk(path) }.getOrDefault(emptyList())
             } else {
                 emptyList()
@@ -192,6 +220,13 @@ internal fun CheatsSettingsSection(
         entriesLoading = false
     }
 
+    suspend fun refreshMaster() {
+        masterEnabled = withContext(Dispatchers.IO) {
+            runCatching { NativeLib.getCheatsEnabled() }.getOrDefault(true)
+        }
+        masterKnown = true
+    }
+
     // Reads the live engine state. Every failure in there is silent, so it has to be visible.
     suspend fun diagnose() {
         if (diagnosing)
@@ -204,7 +239,18 @@ internal fun CheatsSettingsSection(
         diagnosing = false
     }
 
-    LaunchedEffect(Unit) { refreshFiles() }
+    LaunchedEffect(Unit) {
+        refreshFiles()
+        refreshMaster()
+    }
+
+    // The pause menu is opened to change something now, so the running game starts unfolded.
+    LaunchedEffect(files, runningId) {
+        val id = if (inGame) runningId else null
+        if (id != null && expanded == null && files.any { it.titleId == id })
+            expanded = id
+    }
+
     LaunchedEffect(expanded) {
         val id = expanded
         if (id == null) entries = emptyList() else refreshEntries(id)
@@ -233,29 +279,56 @@ internal fun CheatsSettingsSection(
         }
     }
 
+    fun applyMaster(enabled: Boolean) {
+        if (busy)
+            return
+        busy = true
+        failure = null
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                runCatching { NativeLib.setCheatsEnabled(enabled) }.getOrDefault(false)
+            }
+            busy = false
+            if (ok) {
+                masterEnabled = enabled
+                diagnosis = ""
+            } else {
+                failure = context.getString(R.string.settings_cheats_master_failed)
+            }
+        }
+    }
+
     val enabledTotal = files.sumOf { it.enabled }
     val brokenTotal = files.sumOf { it.broken }
     val title = stringResource(R.string.settings_cheats_title)
 
     // Android/data cannot be pasted into from a file manager since Android 11, so the picker is the
-    // only way in on most devices: the file is copied straight into the cheats folder.
+    // only way in on most devices: the file is copied straight into the cheats folder. The pause menu
+    // hides it, a game is running there and pulling another activity in front of it is not wanted.
+    // The owner check keeps this screen from failing its composition in a host that provides no
+    // result registry at all, which is what the emulator overlay used to be.
     val importFailed = stringResource(R.string.settings_cheats_import_failed)
-    val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null)
-            return@rememberLauncherForActivityResult
+    val canImport = !inGame && LocalActivityResultRegistryOwner.current != null
+    val importPicker = if (canImport) {
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null)
+                return@rememberLauncherForActivityResult
 
-        busy = true
-        failure = null
-        scope.launch {
-            val imported = withContext(Dispatchers.IO) { importCheatFile(context, uri, directory) }
-            busy = false
-            if (imported == null) {
-                Toast.makeText(context, importFailed, Toast.LENGTH_LONG).show()
-            } else {
-                Toast.makeText(context, context.getString(R.string.settings_cheats_imported, imported), Toast.LENGTH_LONG).show()
-                refreshFiles()
+            busy = true
+            failure = null
+            scope.launch {
+                val imported = withContext(Dispatchers.IO) { importCheatFile(context, uri, directory) }
+                busy = false
+                if (imported == null) {
+                    Toast.makeText(context, importFailed, Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(context, context.getString(R.string.settings_cheats_imported, imported), Toast.LENGTH_LONG).show()
+                    refreshFiles()
+                }
             }
         }
+    } else {
+        null
     }
 
     SettingsSectionCard(
@@ -272,58 +345,86 @@ internal fun CheatsSettingsSection(
         ),
         onShowHelp = onShowHelp
     ) {
-        SettingsNote(
-            text = if (directory.isBlank()) {
-                stringResource(R.string.settings_cheats_folder_unknown)
+        SettingsToggleRow(
+            title = stringResource(R.string.settings_cheats_master),
+            checked = masterEnabled,
+            enabled = masterKnown && !busy,
+            summary = if (masterEnabled) {
+                stringResource(R.string.settings_cheats_master_on)
             } else {
-                stringResource(R.string.settings_cheats_folder, directory)
-            }
+                stringResource(R.string.settings_cheats_master_off)
+            },
+            onCheckedChange = { applyMaster(it) },
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_cheats_master),
+                body = stringResource(R.string.settings_cheats_master_desc),
+                scope = SettingsScope.Global
+            ),
+            onShowHelp = onShowHelp
         )
 
-        if (scan.isNotBlank())
-            SettingsNote(text = stringResource(R.string.settings_cheats_scan, scan))
+        if (!masterEnabled && files.any { it.enabled > 0 })
+            SettingsNote(
+                text = stringResource(R.string.settings_cheats_master_off_note),
+                color = MaterialTheme.colorScheme.error
+            )
+
+        if (!inGame) {
+            SettingsNote(
+                text = if (directory.isBlank()) {
+                    stringResource(R.string.settings_cheats_folder_unknown)
+                } else {
+                    stringResource(R.string.settings_cheats_folder, directory)
+                }
+            )
+
+            if (scan.isNotBlank())
+                SettingsNote(text = stringResource(R.string.settings_cheats_scan, scan))
+        }
 
         val browseTitle = stringResource(R.string.settings_cheats_browse)
         val browseUnavailable = stringResource(R.string.settings_cheats_browse_unavailable)
         val refreshLabel = stringResource(R.string.settings_cheats_refresh)
-        SettingsActionRow(
-            title = browseTitle,
-            value = stringResource(R.string.settings_cheats_browse_value),
-            onClick = {
-                val authority = VitaDocumentsProvider.authority(context)
-                val candidates = listOf(
-                    Intent(Intent.ACTION_VIEW)
-                        .setDataAndType(
-                            DocumentsContract.buildRootUri(authority, VitaDocumentsProvider.ROOT_ID),
-                            DocumentsContract.Root.MIME_TYPE_ITEM
-                        )
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                    Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-                        .putExtra(
-                            DocumentsContract.EXTRA_INITIAL_URI,
-                            DocumentsContract.buildDocumentUri(authority, VitaDocumentsProvider.DOC_ROOT)
-                        )
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-                val launched = candidates.any { intent ->
-                    runCatching { context.startActivity(intent) }.isSuccess
-                }
-                if (!launched)
-                    Toast.makeText(context, browseUnavailable, Toast.LENGTH_LONG).show()
-            },
-            actionLabel = refreshLabel,
-            onActionClick = { scope.launch { refreshFiles() } },
-            actionEnabled = !loading && !busy,
-            onShowHelp = onShowHelp
-        )
+        if (!inGame) {
+            SettingsActionRow(
+                title = browseTitle,
+                value = stringResource(R.string.settings_cheats_browse_value),
+                onClick = {
+                    val authority = VitaDocumentsProvider.authority(context)
+                    val candidates = listOf(
+                        Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(
+                                DocumentsContract.buildRootUri(authority, VitaDocumentsProvider.ROOT_ID),
+                                DocumentsContract.Root.MIME_TYPE_ITEM
+                            )
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                            .putExtra(
+                                DocumentsContract.EXTRA_INITIAL_URI,
+                                DocumentsContract.buildDocumentUri(authority, VitaDocumentsProvider.DOC_ROOT)
+                            )
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                    val launched = candidates.any { intent ->
+                        runCatching { context.startActivity(intent) }.isSuccess
+                    }
+                    if (!launched)
+                        Toast.makeText(context, browseUnavailable, Toast.LENGTH_LONG).show()
+                },
+                actionLabel = refreshLabel,
+                onActionClick = { scope.launch { refreshFiles() } },
+                actionEnabled = !loading && !busy,
+                onShowHelp = onShowHelp
+            )
 
-        SettingsActionRow(
-            title = stringResource(R.string.settings_cheats_import),
-            value = stringResource(R.string.settings_cheats_import_value),
-            onClick = { importPicker.launch(arrayOf("*/*")) },
-            enabled = !busy && directory.isNotBlank(),
-            onShowHelp = onShowHelp
-        )
+            SettingsActionRow(
+                title = stringResource(R.string.settings_cheats_import),
+                value = stringResource(R.string.settings_cheats_import_value),
+                onClick = { importPicker?.launch(arrayOf("*/*")) },
+                enabled = !busy && directory.isNotBlank() && importPicker != null,
+                onShowHelp = onShowHelp
+            )
+        }
 
         SettingsActionRow(
             title = stringResource(R.string.settings_cheats_diagnose),
@@ -369,12 +470,18 @@ internal fun CheatsSettingsSection(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            SettingsNote(text = stringResource(R.string.settings_cheats_empty))
+            SettingsNote(
+                text = if (!inGame) {
+                    stringResource(R.string.settings_cheats_empty)
+                } else {
+                    stringResource(R.string.settings_cheats_empty_game, runningId.orEmpty())
+                }
+            )
             SettingsNote(text = stringResource(R.string.settings_cheats_empty_hint))
         } else {
             files.forEach { file ->
                 val isOpen = expanded == file.titleId
-                val isRunning = titleId != null && titleId == file.titleId
+                val isRunning = inGame && runningId == file.titleId
                 val counts = stringResource(R.string.settings_cheats_counts, file.enabled, file.total)
                 val brokenCount = if (file.broken > 0) {
                     " · " + stringResource(R.string.settings_cheats_broken_count, file.broken)
@@ -451,7 +558,13 @@ internal fun CheatsSettingsSection(
                             }
                         }
 
-                        SettingsNote(text = stringResource(R.string.settings_cheats_takes_effect))
+                        SettingsNote(
+                            text = if (isRunning) {
+                                stringResource(R.string.settings_cheats_takes_effect_live)
+                            } else {
+                                stringResource(R.string.settings_cheats_takes_effect)
+                            }
+                        )
                     }
                 }
             }

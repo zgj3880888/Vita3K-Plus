@@ -389,6 +389,14 @@
     <string name="settings_cheats_diagnose_working">Reading the live cheat state...</string>
     <string name="settings_cheats_copy">Copy</string>
     <string name="settings_cheats_copied">Diagnosis copied</string>
+    <string name="settings_cheats_master">Cheats enabled</string>
+    <string name="settings_cheats_master_on">On. The switches below write to memory.</string>
+    <string name="settings_cheats_master_off">Off. Nothing is written to memory.</string>
+    <string name="settings_cheats_master_desc">Master switch of the engine, the same one the desktop build has. With it off no code is run at all, so a cheat cannot be blamed for a crash or a glitch while it is off, and turning it off is the quickest way to undo every cheat at once. The choice is stored in the settings file, so the next boot keeps it.</string>
+    <string name="settings_cheats_master_off_note">The master switch is off, so none of the cheats marked on below is running. Turn it on to make them write to memory.</string>
+    <string name="settings_cheats_master_failed">The master switch could not be changed.</string>
+    <string name="settings_cheats_empty_game">This game has no cheat file. The file has to be named after its title id, %1$s.psv, and placed in the cheats folder.</string>
+    <string name="settings_cheats_takes_effect_live">Takes effect at the next frame, the game keeps running. The game may overwrite a value after the first second, which is why codes are re-applied every frame.</string>
 
     <!-- Settings — Core tab -->
     <string name="settings_modules_mode">Module Loading Mode</string>

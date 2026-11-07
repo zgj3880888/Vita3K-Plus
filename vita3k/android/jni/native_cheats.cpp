@@ -25,6 +25,7 @@
 #include <cheat/cheat.h>
 #include <cheat/functions.h>
 #include <cheat/state.h>
+#include <config/functions.h>
 #include <io/state.h>
 #include <kernel/state.h>
 #include <mem/functions.h>
@@ -54,16 +55,53 @@ bool is_running_title(const EmuEnvState &emuenv, const std::string &title_id) {
     return !title_id.empty() && (emuenv.cheat.title_id == title_id);
 }
 
-// Only safe while that title is the loaded one: `reload` first undoes every ARM write of the
-// cheats it is about to replace, which would stomp on another game's patched code.
-void reload_if_running(EmuEnvState &emuenv, const std::string &title_id) {
-    if (!is_running_title(emuenv, title_id))
-        return;
+cheat::JitInvalidate make_invalidate(EmuEnvState &emuenv) {
+    // Captured by value on purpose: the reference parameter is gone by the time this runs.
+    EmuEnvState *state = &emuenv;
 
-    const cheat::JitInvalidate invalidate_jit = [&emuenv](uint32_t address, size_t size) {
-        emuenv.kernel.invalidate_jit_cache(address, size);
+    return [state](uint32_t address, size_t size) {
+        state->kernel.invalidate_jit_cache(address, size);
     };
-    cheat::reload(emuenv.cheat, emuenv.cheat_path, title_id, emuenv.mem, invalidate_jit);
+}
+
+// The loaded copy is the truth while its game runs: it is what the display thread replays on every
+// vblank, so flipping a flag there is enough to start or stop a cheat without touching the file
+// loader. It may only be addressed by index when it came from the same file this screen shows,
+// otherwise a file swapped on disk while the game runs would map the indices onto other cheats.
+bool live_matches(const EmuEnvState &emuenv, const std::string &title_id, const fs::path &path, const cheat::CheatFile &live) {
+    return is_running_title(emuenv, title_id) && !path.empty() && (live.path == path) && !live.cheats.empty();
+}
+
+struct CheatCounts {
+    jint total = 0;
+    jint enabled = 0;
+    jint broken = 0;
+};
+
+// `enabled` is the live flag when the game runs, `enabled_on_boot` (what `_V1` says) otherwise.
+CheatCounts count_cheats(const cheat::CheatFile &file, bool live) {
+    CheatCounts counts;
+    counts.total = static_cast<jint>(file.cheats.size());
+    for (const auto &code : file.cheats) {
+        if (live ? code.enabled : code.enabled_on_boot)
+            ++counts.enabled;
+        if (code.broken)
+            ++counts.broken;
+    }
+
+    return counts;
+}
+
+// The first comment line of a file, which in the databases almost always starts with the title id.
+std::string header_name(const std::string &header, const std::string &title_id) {
+    if ((header.size() <= title_id.size()) || (header.compare(0, title_id.size(), title_id) != 0))
+        return header;
+
+    size_t start = title_id.size();
+    while ((start < header.size()) && ((header[start] == ' ') || (header[start] == '\t') || (header[start] == '-') || (header[start] == ':')))
+        ++start;
+
+    return header.substr(start);
 }
 
 jstring new_string(JNIEnv *env, const std::string &value) {
@@ -86,6 +124,21 @@ jbyteArray new_bytes(JNIEnv *env, const std::string &value) {
 
 jobjectArray make_empty_array(JNIEnv *env, jclass cls) {
     return env->NewObjectArray(0, cls, nullptr);
+}
+
+// One `NativeCheatFile`, built here so that the folder listing and the single game query stay in
+// step: both hand the constructor the same six values in the same order.
+jobject make_file_object(JNIEnv *env, jclass cls, jmethodID ctor, const std::string &title_id, const std::string &name, const fs::path &path, const CheatCounts &counts) {
+    jstring title = new_string(env, title_id);
+    jbyteArray game_name = new_bytes(env, name);
+    jstring file_path = new_string(env, path.generic_string());
+    jobject entry = env->NewObject(cls, ctor, title, game_name, file_path, counts.total, counts.enabled, counts.broken);
+
+    env->DeleteLocalRef(title);
+    env->DeleteLocalRef(game_name);
+    env->DeleteLocalRef(file_path);
+
+    return entry;
 }
 
 // Both result types are only ever instantiated from here, so R8 strips them unless proguard-rules.pro
@@ -206,36 +259,46 @@ Java_org_vita3k_emulator_NativeLib_getCheatFiles(JNIEnv *env, jclass) {
         const cheat::CheatGame &game = games[static_cast<size_t>(i)];
         const cheat::CheatFile file = cheat::parse_cheat_file(game.path, game.title_id);
 
-        jint total = static_cast<jint>(file.cheats.size());
-        jint enabled = 0;
-        jint broken = 0;
-        for (const auto &code : file.cheats) {
-            if (code.enabled_on_boot)
-                ++enabled;
-            if (code.broken)
-                ++broken;
-        }
-
         // The comment line is the friendliest name, the `_S` line one is the fallback.
-        std::string name = game.name;
-        if (name.empty())
-            name = file.header;
+        const std::string name = game.name.empty() ? file.header : game.name;
 
-        jstring title_id = new_string(env, game.title_id);
-        jbyteArray game_name = new_bytes(env, name);
-        jstring path = new_string(env, game.path.generic_string());
-        jobject entry = env->NewObject(cls, ctor, title_id, game_name, path, total, enabled, broken);
-        if (entry)
+        jobject entry = make_file_object(env, cls, ctor, game.title_id, name, game.path, count_cheats(file, false));
+        if (entry) {
             env->SetObjectArrayElement(result, i, entry);
-
-        env->DeleteLocalRef(title_id);
-        env->DeleteLocalRef(game_name);
-        env->DeleteLocalRef(path);
-        if (entry)
             env->DeleteLocalRef(entry);
+        }
     }
 
     return result;
+}
+
+// One game instead of the whole folder. The in-game panel asks for this: a phone whose cheats
+// folder holds a 700 file database would otherwise parse every file on each visit, while a game is
+// running. Returns null when the folder holds nothing for that title.
+JNIEXPORT jobject JNICALL
+Java_org_vita3k_emulator_NativeLib_getCheatFile(JNIEnv *env, jclass, jstring title_id_str) {
+    jclass cls = find_result_class(env, "org/vita3k/emulator/data/NativeCheatFile");
+    if (!cls)
+        return nullptr;
+
+    const jmethodID ctor = find_constructor(env, cls, "(Ljava/lang/String;[BLjava/lang/String;III)V");
+    if (!ctor)
+        return nullptr;
+
+    auto *emuenv = get_emuenv();
+    if (!emuenv)
+        return nullptr;
+
+    const std::string title_id = jstring_to_string(env, title_id_str);
+    const fs::path path = cheat::find_cheat_file(emuenv->cheat_path, title_id);
+    if (path.empty())
+        return nullptr;
+
+    const cheat::CheatFile live = cheat::snapshot(emuenv->cheat);
+    const bool is_live = live_matches(*emuenv, title_id, path, live);
+    const cheat::CheatFile file = is_live ? live : cheat::parse_cheat_file(path, title_id);
+
+    return make_file_object(env, cls, ctor, title_id, header_name(file.header, title_id), path, count_cheats(file, is_live));
 }
 
 JNIEXPORT jobjectArray JNICALL
@@ -260,7 +323,12 @@ Java_org_vita3k_emulator_NativeLib_getCheats(JNIEnv *env, jclass, jstring title_
         return make_empty_array(env, cls);
     }
 
-    const cheat::CheatFile file = cheat::parse_cheat_file(path, title_id);
+    // While the game runs only the loaded copy knows which switches are on: this screen rewrites
+    // that copy, the file on disk still carries what was there at boot until it is saved.
+    const cheat::CheatFile live = cheat::snapshot(emuenv->cheat);
+    const bool is_live = live_matches(*emuenv, title_id, path, live);
+    const cheat::CheatFile file = is_live ? live : cheat::parse_cheat_file(path, title_id);
+
     jobjectArray result = env->NewObjectArray(static_cast<jsize>(file.cheats.size()), cls, nullptr);
     if (!result)
         return nullptr;
@@ -277,7 +345,7 @@ Java_org_vita3k_emulator_NativeLib_getCheats(JNIEnv *env, jclass, jstring title_
         jstring preview_str = new_string(env, preview);
         jobject entry = env->NewObject(cls, ctor,
             name,
-            static_cast<jboolean>(code.enabled_on_boot),
+            static_cast<jboolean>(is_live ? code.enabled : code.enabled_on_boot),
             static_cast<jboolean>(code.broken),
             static_cast<jint>(code.lines.size()),
             preview_str);
@@ -304,17 +372,27 @@ Java_org_vita3k_emulator_NativeLib_setCheatEnabled(JNIEnv *env, jclass, jstring 
     if (path.empty())
         return JNI_FALSE;
 
+    const cheat::CheatFile live = cheat::snapshot(emuenv->cheat);
+    if (live_matches(*emuenv, title_id, path, live)) {
+        if ((index < 0) || (index >= static_cast<jint>(live.cheats.size())))
+            return JNI_FALSE;
+
+        // Flipping the flag in the loaded file is what takes effect: the display thread replays it
+        // on the next vblank and undoes the ARM writes of a cheat that was switched off. `save`
+        // only rewrites the `_V0`/`_V1` digit, so the choice survives to the next boot.
+        cheat::set_cheat_enabled(emuenv->cheat, static_cast<size_t>(index), enabled != JNI_FALSE, emuenv->mem, make_invalidate(*emuenv));
+        if (!cheat::save(emuenv->cheat))
+            LOG_WARN("Cheat screen: switched live, but could not write {}", path.generic_string());
+
+        return JNI_TRUE;
+    }
+
     cheat::CheatFile file = parse_for_edit(path, title_id);
     if ((index < 0) || (index >= static_cast<jint>(file.cheats.size())))
         return JNI_FALSE;
 
     file.cheats[static_cast<size_t>(index)].enabled = enabled != JNI_FALSE;
-    if (!cheat::save_cheat_file(file))
-        return JNI_FALSE;
-
-    reload_if_running(*emuenv, title_id);
-
-    return JNI_TRUE;
+    return cheat::save_cheat_file(file) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -328,6 +406,21 @@ Java_org_vita3k_emulator_NativeLib_setAllCheatsEnabled(JNIEnv *env, jclass, jstr
     if (path.empty())
         return JNI_FALSE;
 
+    const cheat::CheatFile live = cheat::snapshot(emuenv->cheat);
+    if (live_matches(*emuenv, title_id, path, live)) {
+        const cheat::JitInvalidate invalidate = make_invalidate(*emuenv);
+        for (size_t i = 0; i < live.cheats.size(); ++i) {
+            // A broken cheat would only write garbage, so it never gets a `_V1` behind the user's back.
+            const bool on = (enabled != JNI_FALSE) && !live.cheats[i].broken;
+            cheat::set_cheat_enabled(emuenv->cheat, i, on, emuenv->mem, invalidate);
+        }
+
+        if (!cheat::save(emuenv->cheat))
+            LOG_WARN("Cheat screen: switched live, but could not write {}", path.generic_string());
+
+        return JNI_TRUE;
+    }
+
     cheat::CheatFile file = parse_for_edit(path, title_id);
     if (file.cheats.empty())
         return JNI_FALSE;
@@ -337,10 +430,27 @@ Java_org_vita3k_emulator_NativeLib_setAllCheatsEnabled(JNIEnv *env, jclass, jstr
         code.enabled = (enabled != JNI_FALSE) && !code.broken;
     }
 
-    if (!cheat::save_cheat_file(file))
+    return cheat::save_cheat_file(file) ? JNI_TRUE : JNI_FALSE;
+}
+
+// The master switch, the same one the desktop build has: with it off `apply` writes nothing at
+// all, whatever the per cheat switches say. Kept in the config so the next boot agrees with it.
+JNIEXPORT jboolean JNICALL
+Java_org_vita3k_emulator_NativeLib_getCheatsEnabled(JNIEnv *, jclass) {
+    auto *emuenv = get_emuenv();
+
+    return (emuenv && emuenv->cfg.enable_cheats) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_vita3k_emulator_NativeLib_setCheatsEnabled(JNIEnv *, jclass, jboolean enabled) {
+    auto *emuenv = get_emuenv();
+    if (!emuenv)
         return JNI_FALSE;
 
-    reload_if_running(*emuenv, title_id);
+    emuenv->cfg.enable_cheats = enabled != JNI_FALSE;
+    cheat::set_enabled(emuenv->cheat, emuenv->cfg.enable_cheats, emuenv->mem, make_invalidate(*emuenv));
+    config::serialize_config(emuenv->cfg, emuenv->cfg.config_path);
 
     return JNI_TRUE;
 }

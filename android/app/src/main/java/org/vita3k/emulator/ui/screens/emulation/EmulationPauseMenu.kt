@@ -1,6 +1,7 @@
 package org.vita3k.emulator.ui.screens.emulation
 
 import android.view.View
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -54,6 +55,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -107,14 +109,19 @@ object EmulationPauseMenuHost {
         globalSettingsViewModel: SettingsViewModel
     ) {
         composeView.setContent {
-            Vita3KTheme {
-                EmulationPauseMenu(
-                    activity = activity,
-                    sessionViewModel = sessionViewModel,
-                    settingsViewModel = settingsViewModel,
-                    globalSettingsViewModel = globalSettingsViewModel,
-                    hostView = composeView
-                )
+            // The overlay is a bare ComposeView inside an SDL activity, so nothing hands the
+            // settings screens an ActivityResultRegistry; without this a screen that creates a
+            // picker throws while it composes, which killed the app on opening the cheats tab.
+            CompositionLocalProvider(LocalActivityResultRegistryOwner provides activity) {
+                Vita3KTheme {
+                    EmulationPauseMenu(
+                        activity = activity,
+                        sessionViewModel = sessionViewModel,
+                        settingsViewModel = settingsViewModel,
+                        globalSettingsViewModel = globalSettingsViewModel,
+                        hostView = composeView
+                    )
+                }
             }
         }
     }
