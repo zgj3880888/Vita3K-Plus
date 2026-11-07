@@ -125,24 +125,13 @@ jobs:
             echo "::error::unexpected applicationId: $PKG — coexistence with stock Vita3K+ is broken"
             exit 1
           fi
-          if [ -n "${SIGNING_KEY_PASSWORD:-}" ]; then
-            "$BT/apksigner" verify --print-certs "$APK" | head -5 || true
-          fi
+          python3 ci/check_signature.py "$APK" || true
           echo "OK: $PKG installs alongside org.vita3kplus.emulator"
 
       - name: Assert the signing certificate did not change
         run: |
           set -euo pipefail
-          APK="$GITHUB_WORKSPACE/artifacts/uc/app.apk"
-          BT="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)"
-          FP="$("$BT/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
-          EXPECTED="0112af32118e63044db3585b76137f4288261a0f6e1ce1d4d73d603981bf5301"
-          echo "cert sha256 = $FP"
-          if [ "$FP" != "$EXPECTED" ]; then
-            echo "::error::signing certificate changed ($FP), the APK would not install over the previous UC build"
-            exit 1
-          fi
-          echo "OK: signature matches the pinned UC certificate"
+          python3 ci/check_signature.py artifacts/uc/app.apk 0112af32118e63044db3585b76137f4288261a0f6e1ce1d4d73d603981bf5301
 
       - name: Print ccache statistics
         if: always()
