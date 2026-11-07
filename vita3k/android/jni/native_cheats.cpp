@@ -25,6 +25,7 @@
 #include <cheat/cheat.h>
 #include <cheat/functions.h>
 #include <cheat/state.h>
+#include <kernel/state.h>
 #include <util/log.h>
 
 #include <algorithm>
