@@ -52,7 +52,11 @@ object OverlayStore {
         OverlayPositionDefaults(InputOverlay.ButtonType.TRIGGER_L3, R.integer.TRIGGER_L3_X, R.integer.TRIGGER_L3_Y),
         OverlayPositionDefaults(InputOverlay.ButtonType.TRIGGER_R3, R.integer.TRIGGER_R3_X, R.integer.TRIGGER_R3_Y),
         OverlayPositionDefaults(InputOverlay.ButtonType.BUTTON_TOUCH_HIDE, R.integer.BUTTON_TOUCH_HIDE_X, R.integer.BUTTON_TOUCH_HIDE_Y),
-        OverlayPositionDefaults(InputOverlay.ButtonType.BUTTON_TOUCH_SWITCH, R.integer.BUTTON_TOUCH_SWITCH_X, R.integer.BUTTON_TOUCH_SWITCH_Y)
+        OverlayPositionDefaults(InputOverlay.ButtonType.BUTTON_TOUCH_SWITCH, R.integer.BUTTON_TOUCH_SWITCH_X, R.integer.BUTTON_TOUCH_SWITCH_Y),
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_1, R.integer.TOUCH_MAP_1_X, R.integer.TOUCH_MAP_1_Y),
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_2, R.integer.TOUCH_MAP_2_X, R.integer.TOUCH_MAP_2_Y),
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_3, R.integer.TOUCH_MAP_3_X, R.integer.TOUCH_MAP_3_Y),
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_4, R.integer.TOUCH_MAP_4_X, R.integer.TOUCH_MAP_4_Y)
     )
 
     @JvmStatic

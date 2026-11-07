@@ -191,6 +191,19 @@ internal fun OverlaySettingsRows(
             ),
             onShowHelp = onShowHelp
         )
+        SettingsToggleRow(
+            title = stringResource(R.string.settings_controls_touch_map),
+            checked = overlayConfig.touchMapVisible,
+            onCheckedChange = { onOverlayConfigChange(overlayConfig.withTouchMapVisible(it)) },
+            enabled = overlayConfig.controlsVisible,
+            summary = stringResource(R.string.settings_controls_touch_map_summary),
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_controls_touch_map),
+                body = stringResource(R.string.settings_controls_touch_map_desc),
+                scope = SettingsScope.Global
+            ),
+            onShowHelp = onShowHelp
+        )
         SettingsSliderRow(
             title = stringResource(R.string.settings_controls_scale),
             valueLabel = stringResource(R.string.settings_controls_percent_value, overlayConfig.overlayScale),

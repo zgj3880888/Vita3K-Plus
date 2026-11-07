@@ -593,6 +593,9 @@
     <string name="settings_controls_touch_switch_tilt_desc">在 F、B、F+B 之后增加一个 T 档。在该档下触摸屏幕会让主机朝手指方向倾斜，而不是触摸，适用于需要运动传感器的游戏。仅当本机与手柄都没有陀螺仪时可用。</string>
     <string name="settings_controls_hide_toggle">显示隐藏开关</string>
     <string name="settings_controls_hide_toggle_desc">显示用于临时隐藏虚拟按键的按键。</string>
+    <string name="settings_controls_touch_map">触摸映射点</string>
+    <string name="settings_controls_touch_map_summary">用按键代替点屏幕。把映射点拖到游戏要求你点的位置，同时按住两个即可双指缩放。</string>
+    <string name="settings_controls_touch_map_desc">在虚拟按键上增加四个带编号的圆环。按住某个圆环，就等于用一根手指按住它在 Vita 触摸屏上对应的位置，所以需要点击屏幕的游戏不用离开手柄也能玩。在按键布局编辑里把圆环拖到游戏要求点击的地方即可；按住后拖动相当于手指滑动，可以完成划动操作。圆环跟随前触屏/后触屏开关，同一个点也能作用于背部触摸板。</string>
     <string name="settings_controls_scale">按键缩放</string>
     <string name="settings_controls_scale_desc">调整触屏按键大小，更贴合你的手与屏幕。</string>
     <string name="settings_controls_opacity">按键透明度</string>

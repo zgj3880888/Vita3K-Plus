@@ -6,7 +6,20 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <mutex>
+
+// A touch mapping point: an on-screen (or bindable) button whose press is reported to the guest as a
+// finger held at a fixed place on the touch panel, so games that ask for a tap can be played with
+// buttons instead of reaching for the screen.
+static constexpr int MAX_MAPPED_TOUCH = 8;
+
+struct MappedTouch {
+    bool active = false;
+    float x = 0.f; // normalized over the drawable area, same space as SDL finger events
+    float y = 0.f;
+    uint8_t id = 0; // touch id handed out when the point goes down
+};
 
 struct TouchState {
     SceTouchSamplingState touch_mode[2] = { SCE_TOUCH_SAMPLING_STATE_STOP, SCE_TOUCH_SAMPLING_STATE_STOP };
@@ -45,6 +58,7 @@ struct TouchState {
     bool pinch_modifier_enabled = false;
     float pinch_velocity = 0.f;
     bool old_pinch_behavior = false;
+    MappedTouch mapped_touch[MAX_MAPPED_TOUCH] = {};
     static constexpr SceInt16 initial_pinch_dist = 300;
     SceInt16 pinch_dist = initial_pinch_dist;
     SceInt16 pinch_speed = 40;
@@ -91,6 +105,7 @@ struct TouchState {
         pinch_modifier_enabled = false;
         pinch_velocity = 0.f;
         old_pinch_behavior = false;
+        std::fill_n(mapped_touch, MAX_MAPPED_TOUCH, MappedTouch{});
         pinch_dist = initial_pinch_dist;
         pinch_speed = 40;
     }

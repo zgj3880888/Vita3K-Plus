@@ -119,6 +119,22 @@ Java_org_vita3k_emulator_overlay_InputOverlay_setTouchState(JNIEnv *env, jobject
     set_touch_mode(emuenv->touch, static_cast<int>(mode));
 }
 
+JNIEXPORT jint JNICALL
+Java_org_vita3k_emulator_overlay_InputOverlay_setMappedTouch(JNIEnv *env, jobject thiz, jint slot, jfloat x, jfloat y, jboolean active) {
+    auto *emuenv = get_emuenv();
+    if (!emuenv)
+        return -1;
+
+    return set_mapped_touch(emuenv->touch, static_cast<int>(slot), static_cast<float>(x), static_cast<float>(y), active == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_org_vita3k_emulator_overlay_InputOverlay_clearMappedTouch(JNIEnv *env, jobject thiz) {
+    auto *emuenv = get_emuenv();
+    if (emuenv)
+        clear_mapped_touch(emuenv->touch);
+}
+
 JNIEXPORT void JNICALL
 Java_org_vita3k_emulator_Emulator_setDirectPad(JNIEnv *env, jclass, jint device_id, jstring name, jint vendor, jint product, jint crc, jint buttons, jfloatArray axes) {
     auto *emuenv = get_emuenv();

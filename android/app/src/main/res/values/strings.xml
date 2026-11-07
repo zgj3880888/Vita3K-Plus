@@ -592,6 +592,9 @@
     <string name="settings_controls_touch_switch_tilt_desc">Add a T step to the touchscreen switch, after F, B and F+B. In that step, touching the screen tilts the console towards your finger instead of touching it, for games that need the motion sensor. It only works when neither this device nor the controller has a gyroscope.</string>
     <string name="settings_controls_hide_toggle">Show Hide Toggle</string>
     <string name="settings_controls_hide_toggle_desc">Show the button that temporarily hides the on-screen controls.</string>
+    <string name="settings_controls_touch_map">Touch Mapping Points</string>
+    <string name="settings_controls_touch_map_summary">Press a point instead of tapping the screen. Drag the points onto the spot the game asks you to touch; hold two at once for a pinch.</string>
+    <string name="settings_controls_touch_map_desc">Adds four numbered rings to the on-screen controls. Each ring reports a finger held on the Vita touch panel at its own position, so games that ask for a tap can be played without letting go of the pad. Move a ring in the controls editor to put it over the place the game expects a press; dragging while holding slides the finger, which is how swipes are made. The rings follow the front/back touch switch, so the same point works on the rear panel too.</string>
     <string name="settings_controls_scale">Overlay Scale</string>
     <string name="settings_controls_scale_desc">Resize the touch controls to better fit your hands and screen.</string>
     <string name="settings_controls_opacity">Overlay Opacity</string>

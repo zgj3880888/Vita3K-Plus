@@ -12,7 +12,9 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Paint;
 import android.graphics.Rect;
+import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
 import android.util.DisplayMetrics;
 import android.view.MotionEvent;
@@ -35,6 +37,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public final static int OVERLAY_MASK_L3R3 = 4;
   public final static int OVERLAY_MASK_TOUCH_SCREEN_SWITCH = 8;
   public final static int OVERLAY_MASK_HIDE_TOGGLE = 16;
+  public final static int OVERLAY_MASK_TOUCH_MAP = 32;
   private final static int OVERLAY_MASK_UTILITY =
           OVERLAY_MASK_TOUCH_SCREEN_SWITCH | OVERLAY_MASK_HIDE_TOGGLE;
 
@@ -64,6 +67,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private int mOpacity = 100;
   private boolean mTouchSwitchTilt = false;
   private OverlayLayout mLayout;
+  // where each touch mapping point was first pressed, so a drag can be replayed as a slide
+  private final float[] mTouchZoneDownX = new float[ButtonType.TOUCH_MAP_COUNT];
+  private final float[] mTouchZoneDownY = new float[ButtonType.TOUCH_MAP_COUNT];
 
   // last Time the screen was touched
   private long mlastTouchTime;
@@ -183,7 +189,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
 
   public void releaseAllInputs() {
     for (InputOverlayDrawableButton button : overlayButtons) {
-      if ((button.getRole() & OVERLAY_MASK_UTILITY) == 0) {
+      if (isTouchMapZone(button.getLegacyId())) {
+        releaseTouchZone(button);
+      } else if ((button.getRole() & OVERLAY_MASK_UTILITY) == 0) {
         setButton(button.getControl(), false);
       }
       button.setPressedState(false);
@@ -211,7 +219,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   {
     int legacyId = button.getLegacyId();
     button.setPressedState(false);
-    if (legacyId != ButtonType.BUTTON_TOUCH_SWITCH && legacyId != ButtonType.BUTTON_TOUCH_HIDE)
+    if (isTouchMapZone(legacyId))
+      releaseTouchZone(button);
+    else if (legacyId != ButtonType.BUTTON_TOUCH_SWITCH && legacyId != ButtonType.BUTTON_TOUCH_HIDE)
       setButton(button.getControl(), false);
     button.setTrackId(-1);
   }
@@ -368,6 +378,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     boolean concerned = false;
     boolean hideToggled = false;
 
+    // a touch mapping point that is dragged slides its finger along with the pointer
+    if (action == MotionEvent.ACTION_MOVE && moveTouchZones(event))
+      concerned = true;
+
 
 
     for (InputOverlayDrawableButton button : overlayButtons)
@@ -401,6 +415,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
               mHideOverlayButtons = !mHideOverlayButtons;
               hideToggled = true;
             }
+            else if (isTouchMapZone(legacyId))
+              pressTouchZone(button, event.getX(pointerIndex), event.getY(pointerIndex));
             else
               setButton(button.getControl(), true);
           }
@@ -412,7 +428,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
           {
             button.setPressedState(false);
 
-            if (legacyId != ButtonType.BUTTON_TOUCH_SWITCH &&
+            if (isTouchMapZone(legacyId))
+              releaseTouchZone(button);
+            else if (legacyId != ButtonType.BUTTON_TOUCH_SWITCH &&
                     legacyId != ButtonType.BUTTON_TOUCH_HIDE)
               setButton(button.getControl(), false);
 
@@ -732,6 +750,11 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
             R.drawable.button_hide_pressed, ButtonType.BUTTON_TOUCH_HIDE,
             ControlId.touch, OVERLAY_MASK_HIDE_TOGGLE, layout, layoutBounds, mScale, mOpacity));
 
+    // touch mapping points: pressing one reports a finger held on the touch panel
+    for (int i = 0; i < ButtonType.TOUCH_MAP_COUNT; i++)
+      overlayButtons.add(initializeTouchMapButton(getContext(), ButtonType.TOUCH_MAP_1 + i,
+              layout, layoutBounds, mScale, mOpacity, i));
+
       overlayDpads.add(initializeOverlayDpad(getContext(), R.drawable.dpad_idle,
               R.drawable.dpad_up,
               R.drawable.dpad_up_left,
@@ -759,6 +782,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     overlayButtons.clear();
     overlayDpads.clear();
     overlayJoysticks.clear();
+    // the controls are rebuilt from scratch, so any finger a touch mapping point was holding is gone
+    clearMappedTouch();
 
     LayoutBounds layoutBounds = resolveLayoutBounds();
     addVitaOverlayControls(layoutBounds, mLayout);
@@ -874,6 +899,150 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     overlayDrawable.setOpacity((int) (globalOpacity * 0.01 * 255));
 
     return overlayDrawable;
+  }
+
+  private static boolean isTouchMapZone(int legacyId)
+  {
+    return legacyId >= ButtonType.TOUCH_MAP_1
+            && legacyId < ButtonType.TOUCH_MAP_1 + ButtonType.TOUCH_MAP_COUNT;
+  }
+
+  private static int touchMapSlot(int legacyId)
+  {
+    return isTouchMapZone(legacyId) ? legacyId - ButtonType.TOUCH_MAP_1 : -1;
+  }
+
+  /**
+   * Builds the ring used for a touch mapping point. Drawn in code so no extra drawable is needed,
+   * and numbered so several points can be told apart.
+   */
+  private static Bitmap createTouchMapBitmap(int index, boolean pressed)
+  {
+    final int size = 256;
+    final float center = size / 2f;
+    final int accent = pressed ? 0xFFFF7A18 : 0xFFFFFFFF;
+    final Bitmap bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+    final Canvas canvas = new Canvas(bitmap);
+
+    final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    paint.setStyle(Paint.Style.FILL);
+    paint.setColor(pressed ? 0xFFFF7A18 : 0x59101010);
+    canvas.drawCircle(center, center, size * 0.40f, paint);
+
+    paint.setStyle(Paint.Style.STROKE);
+    paint.setStrokeWidth(size * 0.055f);
+    paint.setColor(accent);
+    canvas.drawCircle(center, center, size * 0.40f, paint);
+
+    // ticks just outside the ring make the exact touched spot easy to line up
+    paint.setStrokeWidth(size * 0.03f);
+    paint.setColor(pressed ? 0xFFB33C00 : 0x8CFFFFFF);
+    for (int tick = 0; tick < 4; tick++) {
+      final double angle = Math.PI / 2 * tick;
+      final float dx = (float) Math.cos(angle);
+      final float dy = (float) Math.sin(angle);
+      canvas.drawLine(center + dx * size * 0.455f, center + dy * size * 0.455f,
+              center + dx * size * 0.495f, center + dy * size * 0.495f, paint);
+    }
+
+    paint.setStyle(Paint.Style.FILL);
+    paint.setTextAlign(Paint.Align.CENTER);
+    paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
+    paint.setTextSize(size * 0.42f);
+    paint.setColor(pressed ? 0xFF101010 : accent);
+    final float baseline = center - (paint.descent() + paint.ascent()) / 2f;
+    canvas.drawText(Integer.toString(index + 1), center, baseline, paint);
+
+    return bitmap;
+  }
+
+  private static InputOverlayDrawableButton initializeTouchMapButton(Context context, int legacyId,
+          OverlayLayout layout, LayoutBounds layoutBounds, float globalScale, int globalOpacity,
+          int index)
+  {
+    final Resources res = context.getResources();
+    final float scale = 0.13f * globalScale;
+
+    final Bitmap defaultStateBitmap =
+            resizeBitmap(context, createTouchMapBitmap(index, false), scale);
+    final Bitmap pressedStateBitmap =
+            resizeBitmap(context, createTouchMapBitmap(index, true), scale);
+
+    // control -1: this button never presses anything on the virtual pad, it pokes the touch panel
+    final InputOverlayDrawableButton overlayDrawable =
+            new InputOverlayDrawableButton(res, defaultStateBitmap, pressedStateBitmap, legacyId,
+                    -1, OVERLAY_MASK_TOUCH_MAP);
+
+    OverlayPosition position = layout.positionFor(legacyId);
+    if (position == null)
+      position = new OverlayPosition(0.5f, 0.5f);
+    final int drawableX = Math.round(position.getNormalizedX() * layoutBounds.width);
+    final int drawableY = Math.round(position.getNormalizedY() * layoutBounds.height);
+
+    overlayDrawable.setBounds(drawableX, drawableY,
+            drawableX + overlayDrawable.getWidth(), drawableY + overlayDrawable.getHeight());
+    overlayDrawable.setPosition(drawableX, drawableY);
+    overlayDrawable.setOpacity((int) (globalOpacity * 0.01 * 255));
+
+    return overlayDrawable;
+  }
+
+  /**
+   * Reports a finger at the centre of the point, expressed in the same normalized space as the
+   * surface touch events so the native side can map it through the display viewport.
+   */
+  private void pressTouchZone(InputOverlayDrawableButton button, float downX, float downY)
+  {
+    final int slot = touchMapSlot(button.getLegacyId());
+    if (slot < 0)
+      return;
+
+    mTouchZoneDownX[slot] = downX;
+    mTouchZoneDownY[slot] = downY;
+
+    final int width = Math.max(1, getWidth());
+    final int height = Math.max(1, getHeight());
+    final Rect bounds = button.getBounds();
+    setMappedTouch(slot, bounds.exactCenterX() / width, bounds.exactCenterY() / height, true);
+  }
+
+  private void updateTouchZone(InputOverlayDrawableButton button, float x, float y)
+  {
+    final int slot = touchMapSlot(button.getLegacyId());
+    if (slot < 0)
+      return;
+
+    final int width = Math.max(1, getWidth());
+    final int height = Math.max(1, getHeight());
+    final Rect bounds = button.getBounds();
+    setMappedTouch(slot,
+            (bounds.exactCenterX() + (x - mTouchZoneDownX[slot])) / width,
+            (bounds.exactCenterY() + (y - mTouchZoneDownY[slot])) / height,
+            true);
+  }
+
+  private void releaseTouchZone(InputOverlayDrawableButton button)
+  {
+    final int slot = touchMapSlot(button.getLegacyId());
+    if (slot < 0)
+      return;
+
+    setMappedTouch(slot, 0f, 0f, false);
+  }
+
+  private boolean moveTouchZones(MotionEvent event)
+  {
+    boolean moved = false;
+    for (int i = 0; i < event.getPointerCount(); i++) {
+      final int pointerId = event.getPointerId(i);
+      for (InputOverlayDrawableButton button : overlayButtons) {
+        if (!isTouchMapZone(button.getLegacyId()) || button.getTrackId() != pointerId)
+          continue;
+        updateTouchZone(button, event.getX(i), event.getY(i));
+        moved = true;
+      }
+    }
+    return moved;
   }
 
   /**
@@ -1101,6 +1270,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native void setAxis(int axis, short value);
   public native void setButton(int button, boolean value);
   public native void setTouchState(int mode); // 0 = front, 1 = back, 2 = front + back mirrored
+  // touch mapping: reports a finger held at a normalized position on the touch panel
+  public native int setMappedTouch(int slot, float normalizedX, float normalizedY, boolean active);
+  public native void clearMappedTouch();
 
   private LayoutBounds resolveLayoutBounds() {
     return resolveLayoutBounds(getWidth(), getHeight(), getContext());
@@ -1181,6 +1353,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     public static final int TRIGGER_R3 = 25;
     public static final int BUTTON_TOUCH_HIDE = 1023;
     public static final int BUTTON_TOUCH_SWITCH = 1024;
+    // touch mapping points (also used as the layout key of each point)
+    public static final int TOUCH_MAP_1 = 1100;
+    public static final int TOUCH_MAP_2 = 1101;
+    public static final int TOUCH_MAP_3 = 1102;
+    public static final int TOUCH_MAP_4 = 1103;
+    public static final int TOUCH_MAP_COUNT = 4;
   }
 
   // SDL values

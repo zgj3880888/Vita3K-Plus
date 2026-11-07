@@ -267,9 +267,69 @@ void touch_vsync_update(EmuEnvState &emuenv) {
         }
     }
 
+    // Touch mapping points are merged into the buffer of whichever source filled it, so they work
+    // with the screen, a pad's touchpad or the mouse alike.
+    const bool mapped_tilt = touch.touchscreen_tilt && !touch.is_touchpad;
+    if (!mapped_tilt) {
+        int active_points = 0;
+        for (const auto &point : touch.mapped_touch)
+            active_points += point.active ? 1 : 0;
+        if (active_points > 0) {
+            LOG_INFO_ONCE("[TOUCH] on-screen touch mapping is active");
+            SceTouchData *buffers = touch.touch_buffers[(touch.touch_buffer_idx + 1) % MAX_TOUCH_BUFFER_SAVED];
+            for (int port = 0; port < 2; port++) {
+                if (!touch.touchscreen_both && port != touch.touchscreen_port)
+                    continue;
+                SceTouchData &data = buffers[port];
+                for (const auto &point : touch.mapped_touch) {
+                    if (!point.active || data.reportNum >= SCE_TOUCH_MAX_REPORT)
+                        continue;
+                    // the point is over the letterbox rather than the panel: nothing to report
+                    const float x = (point.x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
+                    const float y = (point.y * emuenv.display.viewport_drawable_h - emuenv.display.viewport_y) / emuenv.display.viewport_h;
+                    if (!(x >= 0.f) || !(y >= 0.f) || x >= 1.f || y >= 1.f)
+                        continue;
+                    SceTouchReport &report = data.report[data.reportNum];
+                    report.id = point.id;
+                    report.force = touch.force_touch_enabled[port] ? 128 : 0;
+                    report.x = static_cast<uint16_t>(x * 1920.f);
+                    report.y = static_cast<uint16_t>((port == SCE_TOUCH_PORT_FRONT) ? (y * 1088.f) : (108.f + y * 781.f));
+                    data.reportNum++;
+                }
+            }
+        }
+    }
+
     touch.touch_buffer_idx++;
     touch.touch_buffer_idx %= MAX_TOUCH_BUFFER_SAVED;
     touch.sample_seq.store(seq, std::memory_order_release);
+}
+
+int set_mapped_touch(TouchState &state, const int slot, const float x, const float y, const bool active) {
+    if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
+        return -1;
+
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    MappedTouch &point = state.mapped_touch[slot];
+    if (active) {
+        if (!std::isfinite(x) || !std::isfinite(y))
+            return -1;
+        point.x = std::clamp(x, 0.f, 1.f);
+        point.y = std::clamp(y, 0.f, 1.f);
+        if (!point.active) {
+            point.id = static_cast<uint8_t>(state.next_touch_id);
+            state.next_touch_id = (state.next_touch_id + 1) % 128;
+        }
+    }
+
+    point.active = active;
+    return 0;
+}
+
+void clear_mapped_touch(TouchState &state) {
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    for (auto &point : state.mapped_touch)
+        point.active = false;
 }
 
 void pinch_modifier(TouchState &state, bool isHold) {

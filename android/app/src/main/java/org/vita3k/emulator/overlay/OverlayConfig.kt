@@ -27,6 +27,9 @@ data class OverlayConfig(
     val hideToggleVisible: Boolean
         get() = overlayMask and InputOverlay.OVERLAY_MASK_HIDE_TOGGLE != 0
 
+    val touchMapVisible: Boolean
+        get() = overlayMask and InputOverlay.OVERLAY_MASK_TOUCH_MAP != 0
+
     fun activeMask(): Int = if (overlayMask == 0) DEFAULT_OVERLAY_MASK else overlayMask
 
     fun withControlsVisible(visible: Boolean): OverlayConfig {
@@ -73,12 +76,23 @@ data class OverlayConfig(
         return copy(overlayMask = updatedMask).normalized()
     }
 
+    fun withTouchMapVisible(visible: Boolean): OverlayConfig {
+        val baseMask = activeMask()
+        val updatedMask = if (visible) {
+            baseMask or InputOverlay.OVERLAY_MASK_TOUCH_MAP
+        } else {
+            baseMask and InputOverlay.OVERLAY_MASK_TOUCH_MAP.inv()
+        }
+        return copy(overlayMask = updatedMask).normalized()
+    }
+
     fun normalized(): OverlayConfig {
         val knownMask = InputOverlay.OVERLAY_MASK_BASIC or
             InputOverlay.OVERLAY_MASK_L2R2 or
             InputOverlay.OVERLAY_MASK_L3R3 or
             InputOverlay.OVERLAY_MASK_TOUCH_SCREEN_SWITCH or
-            InputOverlay.OVERLAY_MASK_HIDE_TOGGLE
+            InputOverlay.OVERLAY_MASK_HIDE_TOGGLE or
+            InputOverlay.OVERLAY_MASK_TOUCH_MAP
         return copy(
             overlayMask = overlayMask.coerceAtLeast(0) and knownMask,
             overlayScale = overlayScale.coerceIn(50, 150),
