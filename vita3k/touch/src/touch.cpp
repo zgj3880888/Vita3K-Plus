@@ -149,6 +149,10 @@ static SceTouchData recover_touchpad_events(const EmuEnvState &emuenv, const int
     return touch_data;
 }
 
+// Implemented next to the mapping points themselves, but needed here because sweeps move forward
+// once per frame, before the reports are filled in.
+static void advance_swipes(TouchState &state, uint64_t now_us);
+
 void touch_vsync_update(EmuEnvState &emuenv) {
     auto &touch = emuenv.touch;
     std::chrono::time_point<std::chrono::steady_clock> ts = std::chrono::steady_clock::now();
@@ -270,6 +274,7 @@ void touch_vsync_update(EmuEnvState &emuenv) {
     // Touch mapping points are merged into the buffer of whichever source filled it, so they work
     // with the screen, a pad's touchpad or the mouse alike.
     const bool mapped_tilt = touch.touchscreen_tilt && !touch.is_touchpad;
+    advance_swipes(touch, timestamp);
     if (!mapped_tilt) {
         int active_points = 0;
         for (const auto &point : touch.mapped_touch)
@@ -284,9 +289,12 @@ void touch_vsync_update(EmuEnvState &emuenv) {
                 for (const auto &point : touch.mapped_touch) {
                     if (!point.held() || data.reportNum >= SCE_TOUCH_MAX_REPORT)
                         continue;
+                    // a sweep reports where the finger is right now, a tap reports where the ring sits
+                    const float panel_x = point.swipe ? point.swipe_x : point.x;
+                    const float panel_y = point.swipe ? point.swipe_y : point.y;
                     // the point is over the letterbox rather than the panel: nothing to report
-                    const float x = (point.x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
-                    const float y = (point.y * emuenv.display.viewport_drawable_h - emuenv.display.viewport_y) / emuenv.display.viewport_h;
+                    const float x = (panel_x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
+                    const float y = (panel_y * emuenv.display.viewport_drawable_h - emuenv.display.viewport_y) / emuenv.display.viewport_h;
                     if (!(x >= 0.f) || !(y >= 0.f) || x >= 1.f || y >= 1.f)
                         continue;
                     SceTouchReport &report = data.report[data.reportNum];
@@ -315,6 +323,39 @@ static void mapped_touch_down(TouchState &state, MappedTouch &point) {
     state.next_touch_id = (state.next_touch_id + 1) % 128;
 }
 
+// How long a sweep takes to cross the panel. Short enough to read as a flick rather than a drag,
+// long enough that the game samples the finger in several places on the way.
+constexpr uint64_t TOUCH_SWIPE_US = 140000;
+
+static void mapped_touch_start_swipe(TouchState &state, MappedTouch &point) {
+    mapped_touch_down(state, point);
+    point.swiping = true;
+    point.swipe_start_us = touch_now_us();
+    // every sweep starts from the middle of the screen, wherever the ring happens to sit
+    point.swipe_x = 0.5f;
+    point.swipe_y = 0.5f;
+}
+
+// Moves every sweep in flight one frame further along. Called with the finger mutex already held.
+static void advance_swipes(TouchState &state, uint64_t now_us) {
+    for (auto &point : state.mapped_touch) {
+        if (!point.swiping)
+            continue;
+
+        const float progress = static_cast<float>(now_us - point.swipe_start_us) / static_cast<float>(TOUCH_SWIPE_US);
+        if (progress >= 1.f) {
+            // the finger reaches the edge and lifts: clearing swiping is what lifts it
+            point.swiping = false;
+            point.pad_active = false;
+            point.active = false;
+            continue;
+        }
+
+        point.swipe_x = 0.5f + point.swipe_dx * point.swipe_span * progress;
+        point.swipe_y = 0.5f + point.swipe_dy * point.swipe_span * progress;
+    }
+}
+
 int set_mapped_touch(TouchState &state, const int slot, const float x, const float y, const bool active) {
     if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
         return -1;
@@ -322,6 +363,12 @@ int set_mapped_touch(TouchState &state, const int slot, const float x, const flo
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
     MappedTouch &point = state.mapped_touch[slot];
     if (active) {
+        if (point.swipe) {
+            // where the ring sits is irrelevant to a sweep, so x/y are ignored on purpose
+            mapped_touch_start_swipe(state, point);
+            point.active = true;
+            return 0;
+        }
         if (!std::isfinite(x) || !std::isfinite(y))
             return -1;
         point.x = std::clamp(x, 0.f, 1.f);
@@ -356,6 +403,15 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
 
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
     MappedTouch &point = state.mapped_touch[slot];
+    if (point.swipe) {
+        // a swipe point fires once per press: holding the button does not keep sweeping, otherwise
+        // a game would see the gesture repeat under a still finger
+        if (active && !point.swiping) {
+            mapped_touch_start_swipe(state, point);
+            LOG_INFO_ONCE("[TOUCH] pad L3/R3 fire a mapping sweep of the touch panel");
+        }
+        return 0;
+    }
     if (active) {
         // Without a reported position the point has nowhere to go. The overlay always sends one as
         // soon as it has a size, so this only bites if the pad is pressed on the very first frame.
@@ -373,6 +429,27 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
     return 0;
 }
 
+int set_mapped_touch_swipe(TouchState &state, const int slot, const float dx, const float dy, const float span) {
+    if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
+        return -1;
+    if (!std::isfinite(dx) || !std::isfinite(dy) || !std::isfinite(span))
+        return -1;
+
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    MappedTouch &point = state.mapped_touch[slot];
+    const float clamped_span = std::clamp(span, 0.f, 0.5f);
+    const bool wants_swipe = clamped_span > 0.f && (dx != 0.f || dy != 0.f);
+
+    point.swipe_dx = dx;
+    point.swipe_dy = dy;
+    point.swipe_span = clamped_span;
+    point.swipe = wants_swipe;
+    if (!wants_swipe)
+        point.swiping = false;
+
+    return 0;
+}
+
 void set_pad_touch_mapping(TouchState &state, const bool enabled) {
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
     state.pad_touch_mapping = enabled;
@@ -387,6 +464,8 @@ void clear_mapped_touch(TouchState &state) {
     for (auto &point : state.mapped_touch) {
         point.active = false;
         point.pad_active = false;
+        // a sweep that was mid flight belongs to the overlay that just went away
+        point.swiping = false;
     }
 }
 

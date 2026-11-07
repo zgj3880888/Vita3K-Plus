@@ -22,7 +22,20 @@ struct MappedTouch {
     float y = 0.f;
     uint8_t id = 0; // touch id handed out when the point goes down
 
-    bool held() const { return active || pad_active; }
+    // Sweep mode. A sweep point drags a finger from the middle of the screen towards one edge over
+    // a short burst of frames instead of holding a single spot, because the prompts that ask for a
+    // flick are looking at where the finger travelled, not where it rests. The sweep keeps running
+    // after the button is released: cutting it short would leave the game with half a gesture.
+    bool swipe = false; // this point sweeps instead of tapping
+    bool swiping = false; // a sweep is in flight
+    float swipe_dx = 0.f; // unit direction on the panel, y grows downwards
+    float swipe_dy = 0.f;
+    float swipe_span = 0.f; // how far it travels from the centre, in panel units
+    uint64_t swipe_start_us = 0;
+    float swipe_x = 0.5f; // where the finger is on this frame
+    float swipe_y = 0.5f;
+
+    bool held() const { return active || pad_active || swiping; }
 };
 
 struct TouchState {
@@ -63,7 +76,7 @@ struct TouchState {
     float pinch_velocity = 0.f;
     bool old_pinch_behavior = false;
     MappedTouch mapped_touch[MAX_MAPPED_TOUCH] = {};
-    // When set, the pad's L3 and R3 hold mapping points 1 and 2 down. This is what makes a game that
+    // When set, the pad's L3 and R3 fire mapping points 1 and 2. This is what makes a game that
     // asks for a tap playable on a DS4 alone, without reaching for the screen. Atomic because the
     // ctrl thread reads it on every input poll while the UI thread writes it from a setting.
     std::atomic<bool> pad_touch_mapping{ true };

@@ -551,10 +551,12 @@ static void apply_direct_pad(EmuEnvState &emuenv, uint32_t *buttons, float axes[
         axes[i] += std::clamp(axis(axis_binds[i]) * multiplier, -1.0f, 1.0f);
 }
 
-// L3 and R3 of a pad hold touch mapping points 1 and 2 down, which is what lets a game that asks for
-// a tap be played from a DS4 without reaching for the screen. The buttons are read straight from SDL
-// instead of from the bits handed to the guest: the Vita's L3/R3 only exist in the extended
-// (SceCtrlData2) read, so a game polling the plain buffer would never light this up.
+// L3 and R3 of a pad drive touch mapping points 1 and 2, which is what lets a game that asks for a
+// tap or a flick be played from a DS4 without reaching for the screen. Point 1 taps, so L3 holds it
+// for as long as the button is down; point 2 sweeps, so R3 fires one gesture per press. The buttons
+// are read straight from SDL instead of from the bits handed to the guest: the Vita's L3/R3 only
+// exist in the extended (SceCtrlData2) read, so a game polling the plain buffer would never light
+// this up.
 static void sync_pad_touch_mapping(EmuEnvState &emuenv) {
     TouchState &touch = emuenv.touch;
     if (!touch.pad_touch_mapping)
