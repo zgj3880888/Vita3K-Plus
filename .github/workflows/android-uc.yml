@@ -8,6 +8,19 @@ name: Build Vita3K+ UC
 #   4. app_name                                Vita3K+ -> Vita3K+ UC
 # The Java package (namespace) deliberately stays org.vita3k.emulator because
 # the native library binds its JNI symbols to it.
+#
+# fix1 (seq 692) — crash hardening found in the Killzone field log:
+#   5. SceGxm: reap display_host_thread in sceGxmTerminate / before the queue
+#      reset in sceGxmInitialize (reassigning a joinable std::thread is UB and
+#      ends in "std::terminate called without an active exception"), and make
+#      the display wait_sync loop observe display_queue.abort().
+#   6. PipelineCache: never stack a second warm/worker thread batch on top of a
+#      live one when init() is repeated after a shader cache rebuild.
+#   7. versionName gains the -fix1 suffix so the build on the device is
+#      identifiable.
+# Signing: the keystore comes from the UC_KEYSTORE_B64 secret and the signing
+# certificate digest is pinned in CI, so every build keeps the same signature
+# and installs over the previous one.
 
 on:
   push:
@@ -78,16 +91,19 @@ jobs:
         with:
           key: android-uc
 
-      - name: Generate signing keystore
+      - name: Restore signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.UC_KEYSTORE_B64 }}
         run: |
-          keytool -genkeypair -v \
-            -keystore "$RUNNER_TEMP/uc-release.jks" \
-            -storetype PKCS12 \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias vita3kuc \
-            -storepass vita3kuc123 -keypass vita3kuc123 \
-            -dname 'CN=Vita3K Plus UC, OU=CloudBuild, O=UC, L=NA, ST=NA, C=CN'
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64:-}" ]; then
+            echo "::error::repository secret UC_KEYSTORE_B64 is missing; the APK would get a fresh certificate and stop installing over previous builds"
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/uc-release.jks"
           ls -la "$RUNNER_TEMP/uc-release.jks"
+          keytool -list -v -keystore "$RUNNER_TEMP/uc-release.jks" \
+            -storepass vita3kuc123 -alias vita3kuc | grep -E 'SHA256|Subject' | head -4
 
       - name: Build Android target (release)
         env:
@@ -120,6 +136,20 @@ jobs:
             "$BT/apksigner" verify --print-certs "$APK" | head -5 || true
           fi
           echo "OK: $PKG installs alongside org.vita3kplus.emulator"
+
+      - name: Assert signing certificate is unchanged
+        run: |
+          set -euo pipefail
+          APK="$GITHUB_WORKSPACE/artifacts/uc/app.apk"
+          BT="$(ls -d "$ANDROID_SDK_ROOT"/build-tools/* | sort -V | tail -1)"
+          FP="$("$BT/apksigner" verify --print-certs "$APK" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -1)"
+          EXPECTED="0112af32118e63044db3585b76137f4288261a0f6e1ce1d4d73d603981bf5301"
+          echo "cert sha256 = $FP"
+          if [ "$FP" != "$EXPECTED" ]; then
+            echo "::error::signing certificate changed ($FP != $EXPECTED) — this APK would no longer install over the previous UC build"
+            exit 1
+          fi
+          echo "OK: signature matches the pinned UC certificate"
 
       - name: Print ccache statistics
         if: always()

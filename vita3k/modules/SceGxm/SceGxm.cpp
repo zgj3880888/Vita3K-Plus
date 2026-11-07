@@ -930,7 +930,7 @@ static void display_entry_thread(EmuEnvState &emuenv) {
                 const renderer::SyncWaitResult res = renderer::wishlist(sync, wanted, 1'000'000);
                 if (res != renderer::SyncWaitResult::TimedOut)
                     return res;
-                if (emuenv.display.abort.load())
+                if (emuenv.display.abort.load() || display_queue.is_aborted())
                     return renderer::SyncWaitResult::Shutdown;
                 stalled_seconds++;
                 if (stalled_seconds == 5 || (stalled_seconds % 30) == 0)
@@ -3137,7 +3137,16 @@ EXPORT(int, sceGxmInitialize, const SceGxmInitializeParams *params) {
     }
     emuenv.gxm.display_queue_thread = display_queue_thread->id;
 
-    // Reset the queue in case sceGxmTerminate was called earlier
+    // Reset the queue in case sceGxmTerminate was called earlier.
+    // The previous display thread has to be reaped first: reset() clears the
+    // abort flag, which would let a thread that is still winding down block on
+    // top() forever, and assigning to a std::thread that is still joinable is
+    // undefined behaviour that ends in
+    // "std::terminate called without an active exception".
+    if (emuenv.gxm.display_host_thread.joinable()) {
+        LOG_WARN("[DISPLAYQ] reaping the previous display thread before sceGxmInitialize");
+        emuenv.gxm.display_host_thread.join();
+    }
     emuenv.gxm.display_queue.reset();
     emuenv.gxm.display_entries_done.store(0, std::memory_order_relaxed);
     emuenv.gxm.display_entries_pushed.store(0, std::memory_order_relaxed);
@@ -5312,6 +5321,16 @@ EXPORT(int, sceGxmTerminate) {
     gxm::destroy_all_contexts(emuenv, false);
     gxm::destroy_all_render_targets(emuenv, false);
     emuenv.gxm.display_queue.abort();
+    // Reap the host thread instead of leaving it joinable. sceGxmTerminate can
+    // be followed by another sceGxmInitialize (the GXM context is recreated
+    // when the game restarts its graphics side), and assigning over a joinable
+    // std::thread calls std::terminate().
+    // The thread exits as soon as it observes the aborted queue, which the
+    // wait_sync loop above now checks, so this blocks for at most one second.
+    if (emuenv.gxm.display_host_thread.joinable()) {
+        LOG_INFO("[DISPLAYQ] waiting for the display thread to finish");
+        emuenv.gxm.display_host_thread.join();
+    }
     emuenv.kernel.get_thread(emuenv.gxm.display_queue_thread)->exit_delete();
     return 0;
 }

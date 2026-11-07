@@ -29,5 +29,5 @@
 
 #pragma once
 
-#define FORK_BUILD_SEQ 691
-#define FORK_BUILD_CHANGES "UC coexisting: accurate-thread-scheduling off, high-accuracy off"
+#define FORK_BUILD_SEQ 692
+#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + fix1: reap display/pipeline threads on GXM re-init (std::terminate), abort-aware display wait"

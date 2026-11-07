@@ -331,9 +331,16 @@ void PipelineCache::init(bool support_rasterized_order_access) {
         if (state.features.support_shader_interlock)
             warm_interlock_render_pass = retrieve_render_pass(vk::Format::eR8G8B8A8Unorm, true, true, true, false, true);
         const int warm_thread_count = std::clamp(nb_worker_threads, 1, 2);
-        warm_threads.reserve(warm_thread_count);
-        for (int i = 0; i < warm_thread_count; i++)
-            warm_threads.emplace_back(&PipelineCache::warm_thread, this, std::ref(*state.mem));
+        // init() can run more than once (shader cache is recreated when the GPU
+        // features change, e.g. after switching drivers). Pushing onto a vector
+        // that still owns live threads ends in std::terminate() once it is
+        // cleared or destroyed, which surfaces as
+        // "std::terminate called without an active exception".
+        if (warm_threads.empty()) {
+            warm_threads.reserve(warm_thread_count);
+            for (int i = 0; i < warm_thread_count; i++)
+                warm_threads.emplace_back(&PipelineCache::warm_thread, this, std::ref(*state.mem));
+        }
         warm_enabled = true;
     }
 }
@@ -348,6 +355,10 @@ void PipelineCache::set_async_compilation(bool enable) {
         return;
 
     if (enable) {
+        // Same hazard as warm_threads: never stack a second set of workers on
+        // top of a live one, or the old handles are destroyed still joinable.
+        if (!worker_threads.empty())
+            return;
         LOG_INFO("Enabling asynchronous pipeline compilation with {} threads", nb_worker_threads);
         worker_threads.reserve(nb_worker_threads);
         for (int i = 0; i < nb_worker_threads; i++) {
