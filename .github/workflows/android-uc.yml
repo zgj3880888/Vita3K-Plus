@@ -79,6 +79,8 @@ jobs:
           key: android-uc
 
       - name: Generate signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.UC_KEYSTORE_B64 }}
         run: |
           keytool -genkeypair -v \
             -keystore "$RUNNER_TEMP/uc-release.jks" \
