@@ -192,21 +192,13 @@ internal fun CheatsSettingsSection(
         entriesLoading = false
     }
 
-    // Reads the live engine state, and optionally makes it write once and report what landed.
-    // Everything here fails silently inside the engine otherwise, so it has to be visible.
-    suspend fun diagnose(withSelfTest: Boolean) {
+    // Reads the live engine state. Every failure in there is silent, so it has to be visible.
+    suspend fun diagnose() {
         if (diagnosing)
             return
         diagnosing = true
-        val running = titleId
         val report = withContext(Dispatchers.IO) {
-            runCatching {
-                buildString {
-                    if (withSelfTest && running != null)
-                        append(NativeLib.runCheatSelfTest(running)).append('\n')
-                    append(NativeLib.getCheatStatus())
-                }
-            }.getOrDefault("")
+            runCatching { NativeLib.getCheatStatus() }.getOrDefault("")
         }
         diagnosis = report
         diagnosing = false
@@ -336,22 +328,10 @@ internal fun CheatsSettingsSection(
         SettingsActionRow(
             title = stringResource(R.string.settings_cheats_diagnose),
             value = stringResource(R.string.settings_cheats_diagnose_value),
-            onClick = { scope.launch { diagnose(withSelfTest = false) } },
+            onClick = { scope.launch { diagnose() } },
             actionLabel = stringResource(R.string.settings_cheats_diagnose_run),
-            onActionClick = { scope.launch { diagnose(withSelfTest = false) } },
+            onActionClick = { scope.launch { diagnose() } },
             actionEnabled = !diagnosing,
-            onShowHelp = onShowHelp
-        )
-
-        SettingsActionRow(
-            title = stringResource(R.string.settings_cheats_selftest),
-            value = if (titleId == null) {
-                stringResource(R.string.settings_cheats_selftest_no_game)
-            } else {
-                stringResource(R.string.settings_cheats_selftest_value)
-            },
-            onClick = { if (titleId != null) scope.launch { diagnose(withSelfTest = true) } },
-            enabled = titleId != null && !diagnosing,
             onShowHelp = onShowHelp
         )
 

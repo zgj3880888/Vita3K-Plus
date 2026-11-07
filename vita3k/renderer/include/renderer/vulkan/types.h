@@ -176,12 +176,13 @@ enum struct BufferType {
 };
 
 struct TrappedBuffer {
-    uint32_t size;
+    uint32_t size = 0;
     // used by the index buffer to keep the max index
-    uint32_t extra;
+    uint32_t extra = ~0;
     // no need for it to be atomic
     bool dirty = false;
-    uint8_t *mapped_location;
+    // null unless the range has a CPU visible mirror, which the upload paths have to check
+    uint8_t *mapped_location = nullptr;
 
     TrappedBuffer() {}
 };

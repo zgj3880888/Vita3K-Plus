@@ -25,6 +25,7 @@
 #include <cheat/cheat.h>
 #include <cheat/functions.h>
 #include <cheat/state.h>
+#include <io/state.h>
 #include <kernel/state.h>
 #include <mem/functions.h>
 #include <mem/ptr.h>
@@ -461,83 +462,6 @@ Java_org_vita3k_emulator_NativeLib_getCheatStatus(JNIEnv *env, jclass) {
         else
             report += ", wanted " + hex_bytes(wanted, width_of(line)) + "\n";
     }
-
-    return new_string(env, report);
-}
-
-// Reloads the cheat file and lets the engine write exactly once, then reads the addresses back.
-// This is what separates "the emulator cannot write there" from "the game never looks at that spot".
-JNIEXPORT jstring JNICALL
-Java_org_vita3k_emulator_NativeLib_runCheatSelfTest(JNIEnv *env, jclass, jstring title_id_str) {
-    auto *emuenv = get_emuenv();
-    if (!emuenv)
-        return new_string(env, "No emulator session.");
-
-    const std::string title_id = jstring_to_string(env, title_id_str);
-    if (title_id.empty())
-        return new_string(env, "Start the game first, then run the test.");
-
-    const cheat::JitInvalidate invalidate_jit = [emuenv](uint32_t address, size_t size) {
-        emuenv->kernel.invalidate_jit_cache(address, size);
-    };
-
-    if (!cheat::reload(emuenv->cheat, emuenv->cheat_path, title_id, emuenv->mem, invalidate_jit))
-        return new_string(env, "No cheat file for " + title_id + ".\nImport it, or rename it to " + title_id + ".psv.");
-
-    cheat::apply(emuenv->cheat, emuenv->mem, invalidate_jit);
-
-    const cheat::CheatFile file = cheat::snapshot(emuenv->cheat);
-    const uint32_t frames = emuenv->cheat.frames_presented.load(std::memory_order_relaxed);
-
-    std::string report = "self-test for " + title_id + "\n";
-    report += "frames: " + std::to_string(frames) + "\n";
-
-    size_t written = 0;
-    size_t lost = 0;
-    size_t unchecked = 0;
-
-    for (size_t i = 0; i < file.cheats.size(); ++i) {
-        const cheat::Cheat &code = file.cheats[i];
-        if (code.broken || !code.enabled)
-            continue;
-
-        if (code.lines.empty() || (code.lines.front().type() != cheat::CodeType::write)) {
-            ++unchecked;
-            continue;
-        }
-
-        const cheat::CodeLine &line = code.lines.front();
-        const uint32_t wanted = line.second & mask_of(line);
-        uint32_t current = 0;
-
-        if (!read_guest(emuenv->mem, line.first, width_of(line), current)) {
-            report += "FAILED  " + code.name + ": " + hex_bytes(line.first, 4) + " is not mapped\n";
-            ++lost;
-            continue;
-        }
-
-        if (current == wanted) {
-            report += "WROTE   " + code.name + ": " + hex_bytes(line.first, 4) + " = " + hex_bytes(current, width_of(line)) + "\n";
-            ++written;
-        } else {
-            report += "IGNORED " + code.name + ": " + hex_bytes(line.first, 4) + " still " + hex_bytes(current, width_of(line))
-                + ", wanted " + hex_bytes(wanted, width_of(line)) + "\n";
-            ++lost;
-        }
-    }
-
-    report += "\n";
-    if (written == 0 && lost == 0) {
-        report += "RESULT: nothing to test. Turn on a cheat whose first line is a plain $0x00 write.\n";
-    } else if (lost > 0) {
-        report += "RESULT: " + std::to_string(lost) + " of " + std::to_string(lost + written)
-            + " cheats could not be written. Those addresses belong to another build or region of the game.\n";
-    } else {
-        report += "RESULT: the engine wrote " + std::to_string(written) + " cheat(s) and the memory kept the values.\n"
-                                                                          "If the game still shows the old numbers, it reads them from somewhere else, so these codes are for a different version.\n";
-    }
-    if (unchecked > 0)
-        report += "(" + std::to_string(unchecked) + " enabled cheat(s) use pointer/other codes and cannot be checked this way.)\n";
 
     return new_string(env, report);
 }

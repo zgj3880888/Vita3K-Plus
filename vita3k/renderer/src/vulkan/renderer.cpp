@@ -2505,7 +2505,55 @@ void VKState::set_turbo_mode(bool set) {
 BufferTrapping::BufferTrapping(VKState &state)
     : state(state) {}
 
+namespace {
+// Host pointer to the CPU visible mirror of a mapped guest block, or null when it has none: an
+// imported native buffer keeps it in its own field, and a mapping the driver refused to keep
+// mapped has none at all.
+uint8_t *mirror_of(const MappedMemory &mapping) {
+    if (const auto *buffer = std::get_if<vkutil::Buffer>(&mapping.buffer_impl))
+        return reinterpret_cast<uint8_t *>(buffer->mapped_data);
+    if (const auto *external = std::get_if<ExternalBuffer>(&mapping.buffer_impl))
+        return reinterpret_cast<uint8_t *>(external->extra);
+    return nullptr;
+}
+
+// Handed back when there is nothing to mirror into. Size zero and a null pointer make the upload
+// paths skip the copy instead of reading an uninitialised mirror, and `extra` stays at ~0 so the
+// max index is taken from guest memory rather than from a value nobody computed.
+TrappedBuffer *unmirrored(TrappedBuffer &buffer) {
+    buffer.size = 0;
+    buffer.extra = ~0;
+    buffer.mapped_location = nullptr;
+    return &buffer;
+}
+} // namespace
+
 TrappedBuffer *BufferTrapping::access_buffer(Address addr, uint32_t size, MemState &mem, bool always_trap, bool cover_everything) {
+    // The requested size is an upper bound, not what the game allocated: a vertex stream is sized
+    // from its highest index and often reaches past the block the game reserved for it. Bailing out
+    // on those left the mirror holding whatever the previous draw put there, and that stale vertex
+    // or uniform data is what the GPU then read, which shows up as scrambled geometry and textures
+    // that flicker between correct and garbage. Mirror the part that is mapped instead.
+    auto mem_it = state.mapped_memories.lower_bound(addr);
+    if (mem_it == state.mapped_memories.end() || addr >= mem_it->first + mem_it->second.size) {
+        LOG_ERROR("Buffer at address {} is not mapped", log_hex(addr));
+        return unmirrored(temp_buffer);
+    }
+
+    const uint32_t available = mem_it->first + mem_it->second.size - addr;
+    if (size > available) {
+        static uint32_t clamped_uploads = 0;
+        const uint32_t n = ++clamped_uploads;
+        if (n <= 8 || (n & (n - 1)) == 0)
+            LOG_WARN("Buffer at address {} ({} bytes) runs past its mapped block, mirroring the {} bytes that are mapped (#{})", log_hex(addr), size, available, n);
+        size = available;
+    }
+
+    uint8_t *const mirror = mirror_of(mem_it->second);
+    const uint8_t *const source = static_cast<const uint8_t *>(Ptr<void>(addr).get(mem));
+    if (!mirror || !source || (size == 0))
+        return unmirrored(temp_buffer);
+
     const bool is_buffer_small = (size < 3 * KiB(4));
 
     if (is_buffer_small && always_trap) {
@@ -2513,23 +2561,17 @@ TrappedBuffer *BufferTrapping::access_buffer(Address addr, uint32_t size, MemSta
         cover_everything = true;
     } else if (is_buffer_small) {
         // not big enough to apply buffer trapping
-        auto mem_it = state.mapped_memories.lower_bound(addr);
-        if (mem_it == state.mapped_memories.end() || mem_it->first + mem_it->second.size < addr + size) {
-            LOG_ERROR("Buffer at address {} is not completely mapped", log_hex(addr));
-            return &temp_buffer;
-        }
-
         temp_buffer.size = size;
-        temp_buffer.mapped_location = reinterpret_cast<uint8_t *>(std::get<vkutil::Buffer>(mem_it->second.buffer_impl).mapped_data);
-        temp_buffer.mapped_location += addr - mem_it->first;
+        temp_buffer.mapped_location = mirror + (addr - mem_it->first);
         temp_buffer.extra = ~0;
 
-        memcpy(temp_buffer.mapped_location, Ptr<void>(addr).get(mem), size);
+        // an imported native buffer is already aliased by the guest, so the copy is onto itself
+        if (temp_buffer.mapped_location != source)
+            memcpy(temp_buffer.mapped_location, source, size);
         return &temp_buffer;
     }
 
     auto it = trapped_buffers.find(addr);
-    bool is_new = false;
     if (it != trapped_buffers.end()) {
         // must check if everything match
         TrappedBuffer &buffer = it->second;
@@ -2538,7 +2580,6 @@ TrappedBuffer *BufferTrapping::access_buffer(Address addr, uint32_t size, MemSta
             return &it->second;
     } else {
         it = trapped_buffers.emplace(std::piecewise_construct, std::forward_as_tuple(addr), std::forward_as_tuple()).first;
-        is_new = true;
     }
 
     {
@@ -2556,17 +2597,8 @@ TrappedBuffer *BufferTrapping::access_buffer(Address addr, uint32_t size, MemSta
     it->second.dirty = false;
     it->second.extra = ~0;
 
-    if (is_new) {
-        // we must find the matching mapped buffer
-        auto mem_it = state.mapped_memories.lower_bound(addr);
-        if (mem_it == state.mapped_memories.end() || mem_it->first + mem_it->second.size < addr + size) {
-            LOG_ERROR("Buffer at address {} is not completely mapped", log_hex(addr));
-            return &it->second;
-        }
-
-        it->second.mapped_location = reinterpret_cast<uint8_t *>(std::get<vkutil::Buffer>(mem_it->second.buffer_impl).mapped_data);
-        it->second.mapped_location += addr - mem_it->first;
-    }
+    // the mirror may have been reallocated since this range was first trapped, so point at it again
+    it->second.mapped_location = mirror + (addr - mem_it->first);
 
     Address aligned_addr;
     uint32_t aligned_size;
@@ -2583,7 +2615,8 @@ TrappedBuffer *BufferTrapping::access_buffer(Address addr, uint32_t size, MemSta
     });
 
     // copy back the data as it was non-existent or dirty
-    memcpy(it->second.mapped_location, Ptr<void>(addr).get(mem), size);
+    if (it->second.mapped_location != source)
+        memcpy(it->second.mapped_location, source, size);
 
     return &it->second;
 }
