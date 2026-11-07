@@ -1573,7 +1573,7 @@ private fun InterfaceSettingsSection(
         }
         SettingsScrollableChoiceField(
             title = uiLanguageTitle,
-            options = uiLanguageOptions.map { it.label },
+            options = uiLanguageOptions.map { stringResource(it.labelRes) },
             selectedIndex = uiLanguageIndex,
             onSelect = { index -> onUpdate { userLang = uiLanguageOptions[index].tag } },
             help = SettingsHelpEntry(

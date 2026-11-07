@@ -1,12 +1,14 @@
 package org.vita3k.emulator.data
 
 import android.content.Context
+import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import org.vita3k.emulator.R
 
 data class UiLanguageOption(
     val tag: String,
-    val label: String
+    @StringRes val labelRes: Int
 )
 
 object UiLanguages {
@@ -14,8 +16,9 @@ object UiLanguages {
     private const val PREF_UI_LANGUAGE = "ui_language"
 
     val options: List<UiLanguageOption> = listOf(
-        UiLanguageOption("", "System Default"),
-        UiLanguageOption("en", "English")
+        UiLanguageOption("", R.string.ui_language_system_default),
+        UiLanguageOption("zh-CN", R.string.ui_language_chinese_simplified),
+        UiLanguageOption("en", R.string.ui_language_english)
     )
 
     fun currentTag(context: Context): String =

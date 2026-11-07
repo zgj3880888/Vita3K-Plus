@@ -482,15 +482,6 @@ private data class ParsedAppVersion(
     val revision: String? = null
 )
 
-private const val ABOUT_DESCRIPTION_HTML =
-    """Vita3K is the world's first functional PS Vita and PS TV emulator, open source and written in C++ for Windows, Linux, macOS, and Android. Visit <a href="https://vita3k.org/quickstart.html">vita3k.org</a> for more info, browse the project on <a href="https://github.com/Vita3K/Vita3K">GitHub</a> if you want to contribute, or support us on <a href="https://ko-fi.com/vita3k">Ko-fi</a>."""
-
-private const val ABOUT_CREDIT_HTML =
-    """Icon by <a href="https://gordonmackayillustration.blogspot.com">Gordon Mackay</a>."""
-
-private const val ABOUT_FOOTER_HTML =
-    """<a href="https://vita3k.org">Website</a> | <a href="https://github.com/Vita3K/Vita3K">GitHub</a> | <a href="https://ko-fi.com/vita3k">Ko-fi</a> | <a href="https://discord.com/invite/6aGwQzh">Discord</a>"""
-
 @Composable
 private fun AppsEmptyState(
     title: String,
@@ -858,17 +849,26 @@ private fun AboutSheet(
             Spacer(modifier = Modifier.height(8.dp))
 
             HtmlText(
-                html = ABOUT_DESCRIPTION_HTML,
+                html = stringResource(R.string.about_description_html),
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodyLarge,
                 gravity = Gravity.CENTER
             )
             HtmlText(
-                html = ABOUT_CREDIT_HTML,
+                html = stringResource(R.string.about_credit_html),
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.bodySmall,
                 textColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 gravity = Gravity.CENTER
+            )
+
+            // 汉化作者署名：这是本分支相对上游唯一额外改动的一行，中文始终显示。
+            Text(
+                text = stringResource(R.string.about_localizer),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary,
+                textAlign = TextAlign.Center
             )
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -883,7 +883,7 @@ private fun AboutSheet(
             Spacer(modifier = Modifier.height(8.dp))
 
             HtmlText(
-                html = ABOUT_FOOTER_HTML,
+                html = stringResource(R.string.about_footer_html),
                 modifier = Modifier.fillMaxWidth(),
                 textStyle = MaterialTheme.typography.titleMedium,
                 gravity = Gravity.CENTER

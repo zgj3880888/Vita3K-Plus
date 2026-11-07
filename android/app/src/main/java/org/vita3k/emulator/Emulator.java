@@ -1603,7 +1603,7 @@ public class Emulator extends SDLActivity
         final boolean initialized = NativeLib.INSTANCE.init(storagePath);
         if (!initialized) {
             Log.e(TAG, "Failed to initialize native session for direct emulator launch");
-            Toast.makeText(this, "Failed to initialize Vita3K.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, getString(R.string.emulator_init_failed_toast), Toast.LENGTH_LONG).show();
         }
         return initialized;
     }

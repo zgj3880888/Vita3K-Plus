@@ -161,6 +161,10 @@
     <string name="about_build">Build: %1$s</string>
     <string name="about_revision">Revision: %1$s</string>
     <string name="about_legal_notice">Vita3K does not condone piracy. You must dump your own games.</string>
+    <string name="about_localizer">震东君 修复汉化</string>
+    <string name="about_description_html"><![CDATA[Vita3K is the world's first functional PS Vita and PS TV emulator, open source and written in C++ for Windows, Linux, macOS, and Android. Visit <a href="https://vita3k.org/quickstart.html">vita3k.org</a> for more info, browse the project on <a href="https://github.com/Vita3K/Vita3K">GitHub</a> if you want to contribute, or support us on <a href="https://ko-fi.com/vita3k">Ko-fi</a>.]]></string>
+    <string name="about_credit_html"><![CDATA[Icon by <a href="https://gordonmackayillustration.blogspot.com">Gordon Mackay</a>.]]></string>
+    <string name="about_footer_html"><![CDATA[<a href="https://vita3k.org">Website</a> | <a href="https://github.com/Vita3K/Vita3K">GitHub</a> | <a href="https://ko-fi.com/vita3k">Ko-fi</a> | <a href="https://discord.com/invite/6aGwQzh">Discord</a>]]></string>
 
     <!-- Updates -->
     <string name="updates_check_title">Check for Updates</string>
@@ -817,4 +821,11 @@
     <string name="settings_emulator_browse_files_unavailable">No document browser found on this device. Vita3K+ still appears as a storage location in the sidebar of the system file picker, and in file managers that support document providers.</string>
     <string name="documents_root_summary">Games, saves, config and logs</string>
     <string name="documents_storage_root_summary">Games and saves (custom storage folder)</string>
+
+    <!-- Interface language options -->
+    <string name="ui_language_system_default">System Default</string>
+    <string name="ui_language_english">English</string>
+    <string name="ui_language_chinese_simplified">简体中文</string>
+
+    <string name="emulator_init_failed_toast">Failed to initialize Vita3K.</string>
 </resources>
