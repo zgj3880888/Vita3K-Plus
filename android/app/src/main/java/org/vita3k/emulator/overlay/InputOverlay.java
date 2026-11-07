@@ -72,13 +72,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private final float[] mTouchZoneDownX = new float[ButtonType.TOUCH_MAP_COUNT];
   private final float[] mTouchZoneDownY = new float[ButtonType.TOUCH_MAP_COUNT];
 
-  // Points 2, 3 and 4 sweep instead of tapping: the gesture some prompts ask for is a finger
-  // travelling across the panel, which a finger resting on one spot never satisfies. Point 1 keeps
-  // tapping, so a plain press is still available.
-  private static final float TOUCH_MAP_SWIPE_SPAN = 0.28f;
-  private static final float[] TOUCH_MAP_SWIPE_DX = { 0f, -1f, 1f, 0f };
-  private static final float[] TOUCH_MAP_SWIPE_DY = { 0f, 0f, 0f, 1f };
-
   // last Time the screen was touched
   private long mlastTouchTime;
   // is the overlay hidden because we didn't used it for long enough ?
@@ -808,7 +801,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
 
     // hand the new places to the native side so L3/R3 can hold them down straight away
     syncTouchMapPositions();
-    applyTouchMapSweeps();
     // repeated on every rebuild on purpose: the native session may not have existed when the
     // preference was first applied, and this is where it becomes live
     setPadTouchMapping(mPadTouchMapping);
@@ -930,12 +922,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     return isTouchMapZone(legacyId) ? legacyId - ButtonType.TOUCH_MAP_1 : -1;
   }
 
-  private static boolean isTouchMapSwipe(int slot)
-  {
-    return slot >= 0 && slot < TOUCH_MAP_SWIPE_DX.length
-            && (TOUCH_MAP_SWIPE_DX[slot] != 0f || TOUCH_MAP_SWIPE_DY[slot] != 0f);
-  }
-
   /**
    * Builds the ring used for a touch mapping point. Drawn in code so no extra drawable is needed,
    * and numbered so several points can be told apart.
@@ -961,33 +947,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     // ticks just outside the ring make the exact touched spot easy to line up
     paint.setStrokeWidth(size * 0.03f);
     paint.setColor(pressed ? 0xFFB33C00 : 0x8CFFFFFF);
-
-    final float swipeDx = (index >= 0 && index < TOUCH_MAP_SWIPE_DX.length) ? TOUCH_MAP_SWIPE_DX[index] : 0f;
-    final float swipeDy = (index >= 0 && index < TOUCH_MAP_SWIPE_DY.length) ? TOUCH_MAP_SWIPE_DY[index] : 0f;
-    if (swipeDx != 0f || swipeDy != 0f) {
-      // a sweep point wears an arrow instead of ticks: it slides, it does not sit
-      paint.setStyle(Paint.Style.STROKE);
-      paint.setStrokeWidth(size * 0.032f);
-      paint.setColor(accent);
-      canvas.drawLine(center + swipeDx * size * 0.430f, center + swipeDy * size * 0.430f,
-              center + swipeDx * size * 0.480f, center + swipeDy * size * 0.480f, paint);
-
-      final float tipX = center + swipeDx * size * 0.512f;
-      final float tipY = center + swipeDy * size * 0.512f;
-      final float baseX = center + swipeDx * size * 0.478f;
-      final float baseY = center + swipeDy * size * 0.478f;
-      final float perpX = -swipeDy * size * 0.032f;
-      final float perpY = swipeDx * size * 0.032f;
-      canvas.drawLine(tipX, tipY, baseX + perpX, baseY + perpY, paint);
-      canvas.drawLine(tipX, tipY, baseX - perpX, baseY - perpY, paint);
-    } else {
-      for (int tick = 0; tick < 4; tick++) {
-        final double angle = Math.PI / 2 * tick;
-        final float dx = (float) Math.cos(angle);
-        final float dy = (float) Math.sin(angle);
-        canvas.drawLine(center + dx * size * 0.455f, center + dy * size * 0.455f,
-                center + dx * size * 0.495f, center + dy * size * 0.495f, paint);
-      }
+    for (int tick = 0; tick < 4; tick++) {
+      final double angle = Math.PI / 2 * tick;
+      final float dx = (float) Math.cos(angle);
+      final float dy = (float) Math.sin(angle);
+      canvas.drawLine(center + dx * size * 0.455f, center + dy * size * 0.455f,
+              center + dx * size * 0.495f, center + dy * size * 0.495f, paint);
     }
 
     paint.setStyle(Paint.Style.FILL);
@@ -1057,11 +1022,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     if (slot < 0)
       return;
 
-    // a sweep already left the centre the moment it was pressed; following the finger would restart
-    // it every frame and pin the gesture at the first step
-    if (isTouchMapSwipe(slot))
-      return;
-
     final int width = Math.max(1, getWidth());
     final int height = Math.max(1, getHeight());
     final Rect bounds = button.getBounds();
@@ -1112,19 +1072,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
         continue;
       final Rect bounds = button.getBounds();
       setMappedTouchPosition(slot, bounds.exactCenterX() / width, bounds.exactCenterY() / height);
-    }
-  }
-
-  /**
-   * Tells the native side which points sweep and towards which side. Repeated on every rebuild for
-   * the same reason as the pad mapping: the emulator session may not have existed the first time.
-   */
-  private void applyTouchMapSweeps()
-  {
-    for (int i = 0; i < ButtonType.TOUCH_MAP_COUNT; i++) {
-      final float dx = TOUCH_MAP_SWIPE_DX[i];
-      final float dy = TOUCH_MAP_SWIPE_DY[i];
-      setMappedTouchSwipe(i, dx, dy, (dx == 0f && dy == 0f) ? 0f : TOUCH_MAP_SWIPE_SPAN);
     }
   }
 
@@ -1357,8 +1304,6 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native int setMappedTouch(int slot, float normalizedX, float normalizedY, boolean active);
   // stores where a point sits without pressing it, so a pad button can use it while rings are hidden
   public native int setMappedTouchPosition(int slot, float normalizedX, float normalizedY);
-  // turns a point into a sweep: pressing it drags a finger from the screen centre towards (dx, dy)
-  public native int setMappedTouchSwipe(int slot, float dx, float dy, float span);
   // lets the pad's L3/R3 hold points 1 and 2 down (the pad is polled natively, not here)
   public native void setPadTouchMapping(boolean enabled);
   public native void clearMappedTouch();

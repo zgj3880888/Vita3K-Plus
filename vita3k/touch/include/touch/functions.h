@@ -20,10 +20,6 @@ int set_mapped_touch(TouchState &state, int slot, float x, float y, bool active)
 int set_mapped_touch_position(TouchState &state, int slot, float x, float y);
 // Presses/releases a mapping point from a pad button (L3 -> slot 0, R3 -> slot 1).
 int set_mapped_touch_pad(TouchState &state, int slot, bool active);
-// Turns a mapping point into a sweep: pressing it drags a finger from the middle of the screen
-// towards (dx, dy) over a short burst of frames instead of holding one spot. span is how far it
-// travels, in panel units; span == 0 (or a zero direction) puts the point back to plain tapping.
-int set_mapped_touch_swipe(TouchState &state, int slot, float dx, float dy, float span);
 void set_pad_touch_mapping(TouchState &state, bool enabled);
 void clear_mapped_touch(TouchState &state);
 int toggle_touchscreen(TouchState &state);
