@@ -37,6 +37,7 @@ import org.vita3k.emulator.R
 import org.vita3k.emulator.data.NativeCheatEntry
 import org.vita3k.emulator.data.NativeCheatFile
 import org.vita3k.emulator.data.VitaDocumentsProvider
+import org.vita3k.emulator.data.displayName
 import java.io.File
 
 /** The nine characters that identify a game, anywhere in a file name. */
@@ -338,7 +339,7 @@ internal fun CheatsSettingsSection(
                     ""
                 }
                 SettingsActionRow(
-                    title = file.name.ifBlank { file.titleId },
+                    title = file.displayName,
                     value = "$runningPrefix${file.titleId} · $counts$brokenCount",
                     onClick = { expanded = if (isOpen) null else file.titleId },
                     onShowHelp = onShowHelp
@@ -377,7 +378,7 @@ internal fun CheatsSettingsSection(
                         } else {
                             entries.forEachIndexed { index, entry ->
                                 SettingsToggleRow(
-                                    title = entry.name,
+                                    title = entry.displayName,
                                     checked = entry.enabled && !entry.broken,
                                     summary = when {
                                         entry.broken -> stringResource(R.string.settings_cheats_broken)
@@ -389,7 +390,7 @@ internal fun CheatsSettingsSection(
                                         applyChange(file.titleId, checked, index, applyAll = false)
                                     },
                                     help = SettingsHelpEntry(
-                                        title = entry.name,
+                                        title = entry.displayName,
                                         body = if (entry.broken) {
                                             stringResource(R.string.settings_cheats_broken_desc)
                                         } else {

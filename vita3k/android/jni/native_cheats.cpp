@@ -65,6 +65,20 @@ jstring new_string(JNIEnv *env, const std::string &value) {
     return env->NewStringUTF(value.c_str());
 }
 
+// Cheat names are whatever the database author saved: UTF-8 today, GBK in the older Chinese
+// collections. NewStringUTF would read GBK bytes as UTF-8 and turn every name into mojibake, so the
+// bytes are handed over untouched and decoded by the caller, which can still try other charsets.
+jbyteArray new_bytes(JNIEnv *env, const std::string &value) {
+    jbyteArray array = env->NewByteArray(static_cast<jsize>(value.size()));
+    if (!array)
+        return nullptr;
+
+    if (!value.empty())
+        env->SetByteArrayRegion(array, 0, static_cast<jsize>(value.size()), reinterpret_cast<const jbyte *>(value.data()));
+
+    return array;
+}
+
 jobjectArray make_empty_array(JNIEnv *env, jclass cls) {
     return env->NewObjectArray(0, cls, nullptr);
 }
@@ -102,7 +116,7 @@ Java_org_vita3k_emulator_NativeLib_getCheatFiles(JNIEnv *env, jclass) {
     if (!cls)
         return nullptr;
 
-    const jmethodID ctor = find_constructor(env, cls, "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;III)V");
+    const jmethodID ctor = find_constructor(env, cls, "(Ljava/lang/String;[BLjava/lang/String;III)V");
     if (!ctor) {
         return make_empty_array(env, cls);
     }
@@ -137,7 +151,7 @@ Java_org_vita3k_emulator_NativeLib_getCheatFiles(JNIEnv *env, jclass) {
             name = file.header;
 
         jstring title_id = new_string(env, game.title_id);
-        jstring game_name = new_string(env, name);
+        jbyteArray game_name = new_bytes(env, name);
         jstring path = new_string(env, game.path.generic_string());
         jobject entry = env->NewObject(cls, ctor, title_id, game_name, path, total, enabled, broken);
         if (entry)
@@ -159,7 +173,7 @@ Java_org_vita3k_emulator_NativeLib_getCheats(JNIEnv *env, jclass, jstring title_
     if (!cls)
         return nullptr;
 
-    const jmethodID ctor = find_constructor(env, cls, "(Ljava/lang/String;ZZILjava/lang/String;)V");
+    const jmethodID ctor = find_constructor(env, cls, "([BZZILjava/lang/String;)V");
     if (!ctor) {
         return make_empty_array(env, cls);
     }
@@ -188,7 +202,7 @@ Java_org_vita3k_emulator_NativeLib_getCheats(JNIEnv *env, jclass, jstring title_
         if (!code.lines.empty())
             preview = cheat::format_code_line(code.lines.front());
 
-        jstring name = new_string(env, code.name);
+        jbyteArray name = new_bytes(env, code.name);
         jstring preview_str = new_string(env, preview);
         jobject entry = env->NewObject(cls, ctor,
             name,
