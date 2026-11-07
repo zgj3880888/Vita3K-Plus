@@ -26,6 +26,8 @@
 #include <dlmalloc.h>
 #include <v3kprintf.h>
 
+#include <mutex>
+
 TRACY_MODULE_NAME(SceLibc);
 
 EXPORT(int, _Assert) {
@@ -188,9 +190,12 @@ EXPORT(int, _Wctomb) {
     return UNIMPLEMENTED();
 }
 
+// The atexit family only has to report success. Destructors of static objects never run on
+// this side anyway, and returning a failure makes some guest runtimes think their CRT is
+// broken.
 EXPORT(int, __aeabi_atexit) {
     TRACY_FUNC(__aeabi_atexit);
-    return UNIMPLEMENTED();
+    return 0;
 }
 
 EXPORT(int, __at_quick_exit) {
@@ -200,27 +205,65 @@ EXPORT(int, __at_quick_exit) {
 
 EXPORT(int, __cxa_atexit) {
     TRACY_FUNC(__cxa_atexit);
-    return UNIMPLEMENTED();
+    return 0;
 }
 
 EXPORT(int, __cxa_finalize) {
     TRACY_FUNC(__cxa_finalize);
-    return UNIMPLEMENTED();
+    return 0;
 }
 
-EXPORT(int, __cxa_guard_abort) {
-    TRACY_FUNC(__cxa_guard_abort);
-    return UNIMPLEMENTED();
+// __cxa_guard_* are the function-local static initialisation protocol. An ARM EABI __guard is
+// a 4-byte word whose first byte is the "already initialised" flag:
+//   acquire() -> 1: the caller must run the initialiser, 0: it must skip it
+//   release() -> set the flag once the initialiser succeeded, abort() -> roll it back
+// All three used to fall through to UNIMPLEMENTED(), which returns 0 - the value meaning
+// "already initialised", for every guard in the guest. So every function-local static was
+// silently left zero-initialised: a `static Foo *s_instance = new Foo;` singleton stays
+// nullptr while the rest of the game keeps dereferencing it. That is what GB3 hits right after
+// startup: it calls sceKernelCreateLwMutex(0xB8, "CriticalSection") - a member offset off a
+// null object - and then writes through 0x0 until the null guard page refuses the write.
+static std::mutex cxa_guard_mutex;
+
+static uint8_t *cxa_guard_byte(EmuEnvState &emuenv, Ptr<uint8_t> guard) {
+    if (!guard.valid(emuenv.mem))
+        return nullptr;
+
+    return guard.get(emuenv.mem);
 }
 
-EXPORT(int, __cxa_guard_acquire) {
-    TRACY_FUNC(__cxa_guard_acquire);
-    return UNIMPLEMENTED();
+EXPORT(int, __cxa_guard_acquire, Ptr<uint8_t> guard) {
+    TRACY_FUNC(__cxa_guard_acquire, guard);
+    uint8_t *flag = cxa_guard_byte(emuenv, guard);
+    if (flag == nullptr) {
+        LOG_WARN("__cxa_guard_acquire(0x{:X}): guard is not mapped, letting the guest initialise", guard.address());
+        return 1;
+    }
+
+    std::lock_guard<std::mutex> lock(cxa_guard_mutex);
+    const bool initialised = (*flag != 0);
+    LOG_INFO_ONCE("[CXA] __cxa_guard_acquire(0x{:X}) -> {} (call 1)",
+        guard.address(), initialised ? "already initialised, skipping" : "running the initialiser");
+
+    return initialised ? 0 : 1;
 }
 
-EXPORT(int, __cxa_guard_release) {
-    TRACY_FUNC(__cxa_guard_release);
-    return UNIMPLEMENTED();
+EXPORT(int, __cxa_guard_release, Ptr<uint8_t> guard) {
+    TRACY_FUNC(__cxa_guard_release, guard);
+    uint8_t *flag = cxa_guard_byte(emuenv, guard);
+    if (flag == nullptr)
+        return 0;
+
+    std::lock_guard<std::mutex> lock(cxa_guard_mutex);
+    *flag = 1;
+    return 0;
+}
+
+EXPORT(int, __cxa_guard_abort, Ptr<uint8_t> guard) {
+    TRACY_FUNC(__cxa_guard_abort, guard);
+    // acquire() writes nothing, so a failed initialiser leaves nothing to undo. Keeping the
+    // flag clear means the next call retries the initialiser, which is what the ABI wants.
+    return 0;
 }
 
 EXPORT(void, __cxa_set_dso_handle_main, Ptr<void> dso) {
