@@ -56,6 +56,34 @@ private fun importedCheatName(source: String): String? {
     return "$titleId.psv"
 }
 
+/**
+ * The same walk the native side does, kept on the Kotlin side so the screen can tell "the folder is
+ * empty" apart from "the folder has files but the emulator failed to report them". Everything here is
+ * plain java.io on the app's own external files directory, so it cannot fail for permission reasons.
+ */
+private fun listCheatFilesOnDisk(directory: String, depth: Int = 0): List<String> {
+    if (depth > 4 || directory.isBlank())
+        return emptyList()
+
+    val entries = File(directory).listFiles() ?: return emptyList()
+    val found = mutableListOf<String>()
+    for (entry in entries) {
+        if (entry.isDirectory) {
+            if (!entry.name.startsWith("."))
+                found += listCheatFilesOnDisk(entry.path, depth + 1)
+            continue
+        }
+        if (isCheatFileName(entry.name))
+            found += entry.name
+    }
+    return found
+}
+
+private fun isCheatFileName(name: String): Boolean {
+    val extension = name.substringAfterLast('.', "").lowercase()
+    return extension == "psv" || extension == "txt" || extension == "db"
+}
+
 private fun displayNameOf(context: Context, uri: Uri): String? {
     val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
     context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
@@ -117,6 +145,8 @@ internal fun CheatsSettingsSection(
     var entriesLoading by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     var scan by remember { mutableStateOf("") }
+    // Only filled when the emulator reports nothing, as the proof that the files are really there.
+    var diskFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     // Reading the folder parses every cheat file, so it never runs on the composition thread.
     suspend fun refreshFiles() {
@@ -130,9 +160,17 @@ internal fun CheatsSettingsSection(
         val summary = withContext(Dispatchers.IO) {
             runCatching { NativeLib.getCheatScan() }.getOrDefault("")
         }
+        val onDisk = withContext(Dispatchers.IO) {
+            if (loaded.isEmpty()) {
+                runCatching { listCheatFilesOnDisk(path) }.getOrDefault(emptyList())
+            } else {
+                emptyList()
+            }
+        }
         files = loaded
         directory = path
         scan = summary
+        diskFiles = onDisk
         loading = false
         if (expanded != null && loaded.none { it.titleId == expanded }) {
             expanded = null
@@ -272,6 +310,16 @@ internal fun CheatsSettingsSection(
         if (loading && files.isEmpty()) {
             SettingsLoadingState()
         } else if (files.isEmpty()) {
+            if (diskFiles.isNotEmpty()) {
+                SettingsNote(
+                    text = stringResource(
+                        R.string.settings_cheats_disk_mismatch,
+                        diskFiles.size,
+                        diskFiles.take(4).joinToString(", ")
+                    ),
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
             SettingsNote(text = stringResource(R.string.settings_cheats_empty))
             SettingsNote(text = stringResource(R.string.settings_cheats_empty_hint))
         } else {

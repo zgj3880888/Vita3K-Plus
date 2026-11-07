@@ -69,17 +69,40 @@ jobjectArray make_empty_array(JNIEnv *env, jclass cls) {
     return env->NewObjectArray(0, cls, nullptr);
 }
 
+// Both result types are only ever instantiated from here, so R8 strips them unless proguard-rules.pro
+// keeps them. That used to fail silently: the list came back empty however many cheat files were in
+// the folder. Report it loudly instead, the message ends up in the emulator log.
+jclass find_result_class(JNIEnv *env, const char *name) {
+    jclass cls = env->FindClass(name);
+    if (cls)
+        return cls;
+
+    env->ExceptionClear();
+    LOG_ERROR("Cheat screen: class {} is missing from the APK (see proguard-rules.pro)", name);
+    return nullptr;
+}
+
+jmethodID find_constructor(JNIEnv *env, jclass cls, const char *signature) {
+    const jmethodID ctor = env->GetMethodID(cls, "<init>", signature);
+    if (ctor)
+        return ctor;
+
+    env->ExceptionClear();
+    LOG_ERROR("Cheat screen: the result class has no constructor {} (kept but stripped?)", signature);
+    return nullptr;
+}
+
 } // namespace
 
 extern "C" {
 
 JNIEXPORT jobjectArray JNICALL
 Java_org_vita3k_emulator_NativeLib_getCheatFiles(JNIEnv *env, jclass) {
-    jclass cls = env->FindClass("org/vita3k/emulator/data/NativeCheatFile");
+    jclass cls = find_result_class(env, "org/vita3k/emulator/data/NativeCheatFile");
     if (!cls)
         return nullptr;
 
-    const jmethodID ctor = env->GetMethodID(cls, "<init>", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;III)V");
+    const jmethodID ctor = find_constructor(env, cls, "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;III)V");
     if (!ctor) {
         return make_empty_array(env, cls);
     }
@@ -132,11 +155,11 @@ Java_org_vita3k_emulator_NativeLib_getCheatFiles(JNIEnv *env, jclass) {
 
 JNIEXPORT jobjectArray JNICALL
 Java_org_vita3k_emulator_NativeLib_getCheats(JNIEnv *env, jclass, jstring title_id_str) {
-    jclass cls = env->FindClass("org/vita3k/emulator/data/NativeCheatEntry");
+    jclass cls = find_result_class(env, "org/vita3k/emulator/data/NativeCheatEntry");
     if (!cls)
         return nullptr;
 
-    const jmethodID ctor = env->GetMethodID(cls, "<init>", "(Ljava/lang/String;ZZILjava/lang/String;)V");
+    const jmethodID ctor = find_constructor(env, cls, "(Ljava/lang/String;ZZILjava/lang/String;)V");
     if (!ctor) {
         return make_empty_array(env, cls);
     }
