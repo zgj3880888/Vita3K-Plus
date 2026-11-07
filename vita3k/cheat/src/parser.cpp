@@ -256,8 +256,10 @@ fs::path find_cheat_file(const fs::path &cheats_dir, const std::string &title_id
             continue;
         }
 
-        // A name the user edited or a browser renamed, e.g. `PCSF00403 (1).psv`.
-        if (title_id_of_path(path) == wanted)
+        // A name the user edited or a browser renamed, e.g. `PCSF00403 (1).psv`. The extension still
+        // has to be one the parser reads, or a stray `PCSF00403.bak` would be picked over the real file.
+        const bool readable = filename.ends_with(".PSV") || filename.ends_with(".TXT");
+        if (readable && (title_id_of_path(path) == wanted))
             loosely_named.push_back(path);
     }
 
