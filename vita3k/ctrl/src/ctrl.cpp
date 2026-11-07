@@ -23,6 +23,8 @@
 #include <display/functions.h>
 #include <display/state.h>
 #include <kernel/state.h>
+#include <touch/functions.h>
+#include <touch/state.h>
 #include <util/log.h>
 
 #ifdef __ANDROID__
@@ -549,6 +551,35 @@ static void apply_direct_pad(EmuEnvState &emuenv, uint32_t *buttons, float axes[
         axes[i] += std::clamp(axis(axis_binds[i]) * multiplier, -1.0f, 1.0f);
 }
 
+// L3 and R3 of a pad hold touch mapping points 1 and 2 down, which is what lets a game that asks for
+// a tap be played from a DS4 without reaching for the screen. The buttons are read straight from SDL
+// instead of from the bits handed to the guest: the Vita's L3/R3 only exist in the extended
+// (SceCtrlData2) read, so a game polling the plain buffer would never light this up.
+static void sync_pad_touch_mapping(EmuEnvState &emuenv) {
+    TouchState &touch = emuenv.touch;
+    if (!touch.pad_touch_mapping)
+        return;
+
+    const auto &binds = emuenv.cfg.controller_binds;
+    if (static_cast<size_t>(SDL_GAMEPAD_BUTTON_RIGHT_STICK) >= binds.size())
+        return;
+
+    const auto l3 = static_cast<SDL_GamepadButton>(binds[SDL_GAMEPAD_BUTTON_LEFT_STICK]);
+    const auto r3 = static_cast<SDL_GamepadButton>(binds[SDL_GAMEPAD_BUTTON_RIGHT_STICK]);
+
+    bool l3_held = false;
+    bool r3_held = false;
+    for (const auto &[_, controller] : emuenv.ctrl.controllers) {
+        if (!controller.controller)
+            continue;
+        l3_held = l3_held || SDL_GetGamepadButton(controller.controller.get(), l3);
+        r3_held = r3_held || SDL_GetGamepadButton(controller.controller.get(), r3);
+    }
+
+    set_mapped_touch_pad(touch, 0, l3_held);
+    set_mapped_touch_pad(touch, 1, r3_held);
+}
+
 static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool negative, bool from_ext_function, SceUInt32 &buttons, SceUInt8 &lx, SceUInt8 &ly, SceUInt8 &rx, SceUInt8 &ry) {
     std::lock_guard<std::mutex> guard(emuenv.ctrl.mutex);
 
@@ -579,9 +610,14 @@ static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool n
     };
 
     if (state.input_intercepted() || emuenv.drop_inputs) {
+        // the pause menu is up: never let a pad button keep a finger on the panel
+        set_mapped_touch_pad(emuenv.touch, 0, false);
+        set_mapped_touch_pad(emuenv.touch, 1, false);
         reset_axes();
         return;
     }
+
+    sync_pad_touch_mapping(emuenv);
 
     if (emuenv.cfg.current_config.pstv_mode) {
         if (port == 1) {

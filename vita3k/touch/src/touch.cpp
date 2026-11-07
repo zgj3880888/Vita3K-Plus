@@ -273,7 +273,7 @@ void touch_vsync_update(EmuEnvState &emuenv) {
     if (!mapped_tilt) {
         int active_points = 0;
         for (const auto &point : touch.mapped_touch)
-            active_points += point.active ? 1 : 0;
+            active_points += point.held() ? 1 : 0;
         if (active_points > 0) {
             LOG_INFO_ONCE("[TOUCH] on-screen touch mapping is active");
             SceTouchData *buffers = touch.touch_buffers[(touch.touch_buffer_idx + 1) % MAX_TOUCH_BUFFER_SAVED];
@@ -282,7 +282,7 @@ void touch_vsync_update(EmuEnvState &emuenv) {
                     continue;
                 SceTouchData &data = buffers[port];
                 for (const auto &point : touch.mapped_touch) {
-                    if (!point.active || data.reportNum >= SCE_TOUCH_MAX_REPORT)
+                    if (!point.held() || data.reportNum >= SCE_TOUCH_MAX_REPORT)
                         continue;
                     // the point is over the letterbox rather than the panel: nothing to report
                     const float x = (point.x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
@@ -305,6 +305,16 @@ void touch_vsync_update(EmuEnvState &emuenv) {
     touch.sample_seq.store(seq, std::memory_order_release);
 }
 
+// Hands a fresh touch id to a point that goes from fully released to held, whichever source pressed
+// it, so a finger and a pad button holding the same point do not fight over the id.
+static void mapped_touch_down(TouchState &state, MappedTouch &point) {
+    if (point.held())
+        return;
+
+    point.id = static_cast<uint8_t>(state.next_touch_id);
+    state.next_touch_id = (state.next_touch_id + 1) % 128;
+}
+
 int set_mapped_touch(TouchState &state, const int slot, const float x, const float y, const bool active) {
     if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
         return -1;
@@ -316,20 +326,68 @@ int set_mapped_touch(TouchState &state, const int slot, const float x, const flo
             return -1;
         point.x = std::clamp(x, 0.f, 1.f);
         point.y = std::clamp(y, 0.f, 1.f);
-        if (!point.active) {
-            point.id = static_cast<uint8_t>(state.next_touch_id);
-            state.next_touch_id = (state.next_touch_id + 1) % 128;
-        }
+        point.has_position = true;
+        mapped_touch_down(state, point);
     }
 
     point.active = active;
     return 0;
 }
 
+int set_mapped_touch_position(TouchState &state, const int slot, const float x, const float y) {
+    if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
+        return -1;
+    if (!std::isfinite(x) || !std::isfinite(y))
+        return -1;
+
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    MappedTouch &point = state.mapped_touch[slot];
+    point.x = std::clamp(x, 0.f, 1.f);
+    point.y = std::clamp(y, 0.f, 1.f);
+    point.has_position = true;
+    return 0;
+}
+
+int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
+    if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
+        return -1;
+    if (!state.pad_touch_mapping && active)
+        return 0;
+
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    MappedTouch &point = state.mapped_touch[slot];
+    if (active) {
+        // Without a reported position the point has nowhere to go. The overlay always sends one as
+        // soon as it has a size, so this only bites if the pad is pressed on the very first frame.
+        if (!point.has_position) {
+            LOG_WARN_ONCE("[TOUCH] pad touch mapping has no position yet; open the controls editor once to place the points");
+            return -1;
+        }
+        mapped_touch_down(state, point);
+        point.pad_active = true;
+        LOG_INFO_ONCE("[TOUCH] pad L3/R3 press a mapping point of the touch panel");
+        return 0;
+    }
+
+    point.pad_active = false;
+    return 0;
+}
+
+void set_pad_touch_mapping(TouchState &state, const bool enabled) {
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    state.pad_touch_mapping = enabled;
+    if (!enabled) {
+        for (auto &point : state.mapped_touch)
+            point.pad_active = false;
+    }
+}
+
 void clear_mapped_touch(TouchState &state) {
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
-    for (auto &point : state.mapped_touch)
+    for (auto &point : state.mapped_touch) {
         point.active = false;
+        point.pad_active = false;
+    }
 }
 
 void pinch_modifier(TouchState &state, bool isHold) {

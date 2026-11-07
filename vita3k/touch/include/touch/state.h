@@ -16,9 +16,13 @@ static constexpr int MAX_MAPPED_TOUCH = 8;
 
 struct MappedTouch {
     bool active = false;
+    bool pad_active = false; // held by a pad button rather than a finger on the overlay ring
+    bool has_position = false; // the overlay told us where this point sits
     float x = 0.f; // normalized over the drawable area, same space as SDL finger events
     float y = 0.f;
     uint8_t id = 0; // touch id handed out when the point goes down
+
+    bool held() const { return active || pad_active; }
 };
 
 struct TouchState {
@@ -59,6 +63,10 @@ struct TouchState {
     float pinch_velocity = 0.f;
     bool old_pinch_behavior = false;
     MappedTouch mapped_touch[MAX_MAPPED_TOUCH] = {};
+    // When set, the pad's L3 and R3 hold mapping points 1 and 2 down. This is what makes a game that
+    // asks for a tap playable on a DS4 alone, without reaching for the screen. Atomic because the
+    // ctrl thread reads it on every input poll while the UI thread writes it from a setting.
+    std::atomic<bool> pad_touch_mapping{ true };
     static constexpr SceInt16 initial_pinch_dist = 300;
     SceInt16 pinch_dist = initial_pinch_dist;
     SceInt16 pinch_speed = 40;

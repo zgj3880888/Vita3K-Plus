@@ -9,7 +9,9 @@ add_library(
 
 target_include_directories(ctrl PUBLIC include)
 target_link_libraries(ctrl PUBLIC emuenv SDL3::SDL3 util)
-target_link_libraries(ctrl PRIVATE config display kernel)
+# touch: ctrl reads L3/R3 off the pad and holds the touch mapping points down with them. The two
+# libraries already refer to each other (touch calls back into ctrl), which is fine for static libs.
+target_link_libraries(ctrl PRIVATE config display kernel touch)
 if(ANDROID)
 	target_link_libraries(ctrl PRIVATE android)
 endif()

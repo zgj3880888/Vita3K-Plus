@@ -66,6 +66,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private float mScale = 1.0f;
   private int mOpacity = 100;
   private boolean mTouchSwitchTilt = false;
+  private boolean mPadTouchMapping = true;
   private OverlayLayout mLayout;
   // where each touch mapping point was first pressed, so a drag can be replayed as a slide
   private final float[] mTouchZoneDownX = new float[ButtonType.TOUCH_MAP_COUNT];
@@ -798,6 +799,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
         setTouchState(restored);
     }
 
+    // hand the new places to the native side so L3/R3 can hold them down straight away
+    syncTouchMapPositions();
+    // repeated on every rebuild on purpose: the native session may not have existed when the
+    // preference was first applied, and this is where it becomes live
+    setPadTouchMapping(mPadTouchMapping);
+
     invalidate();
   }
 
@@ -827,6 +834,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     float normalizedY = layoutBounds.height > 0 ? (float) y / layoutBounds.height : 0f;
     OverlayLayout updatedLayout = mLayout.withPosition(buttonType, normalizedX, normalizedY);
     setLayout(updatedLayout, false);
+    // dragging a ring does not rebuild the controls, so push the new place by hand
+    if (isTouchMapZone(buttonType))
+      syncTouchMapPositions();
   }
 
   /**
@@ -1043,6 +1053,26 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
       }
     }
     return moved;
+  }
+
+  /**
+   * Tells the native side where every point sits, without pressing anything. Without this the pad's
+   * L3/R3 would have nothing to hold down while the rings are hidden behind a controller.
+   */
+  private void syncTouchMapPositions()
+  {
+    final int width = getWidth();
+    final int height = getHeight();
+    if (width <= 0 || height <= 0)
+      return;
+
+    for (InputOverlayDrawableButton button : overlayButtons) {
+      final int slot = touchMapSlot(button.getLegacyId());
+      if (slot < 0)
+        continue;
+      final Rect bounds = button.getBounds();
+      setMappedTouchPosition(slot, bounds.exactCenterX() / width, bounds.exactCenterY() / height);
+    }
   }
 
   /**
@@ -1272,6 +1302,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native void setTouchState(int mode); // 0 = front, 1 = back, 2 = front + back mirrored
   // touch mapping: reports a finger held at a normalized position on the touch panel
   public native int setMappedTouch(int slot, float normalizedX, float normalizedY, boolean active);
+  // stores where a point sits without pressing it, so a pad button can use it while rings are hidden
+  public native int setMappedTouchPosition(int slot, float normalizedX, float normalizedY);
+  // lets the pad's L3/R3 hold points 1 and 2 down (the pad is polled natively, not here)
+  public native void setPadTouchMapping(boolean enabled);
   public native void clearMappedTouch();
 
   private LayoutBounds resolveLayoutBounds() {
@@ -1309,15 +1343,18 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     float resolvedScale = normalizedConfig.getOverlayScale() / 100f;
     int resolvedOpacity = normalizedConfig.getOverlayOpacity();
     boolean resolvedTouchSwitchTilt = normalizedConfig.getTouchSwitchTilt();
+    boolean resolvedPadTouchMapping = normalizedConfig.getPadTouchMapping();
     boolean changed = !normalizedLayout.equals(mLayout)
             || Float.compare(mScale, resolvedScale) != 0
             || mOpacity != resolvedOpacity
-            || mTouchSwitchTilt != resolvedTouchSwitchTilt;
+            || mTouchSwitchTilt != resolvedTouchSwitchTilt
+            || mPadTouchMapping != resolvedPadTouchMapping;
 
     mLayout = normalizedLayout;
     mScale = resolvedScale;
     mOpacity = resolvedOpacity;
     mTouchSwitchTilt = resolvedTouchSwitchTilt;
+    mPadTouchMapping = resolvedPadTouchMapping;
 
     if (refresh && changed)
       refreshControls();

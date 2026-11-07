@@ -204,6 +204,20 @@ internal fun OverlaySettingsRows(
             ),
             onShowHelp = onShowHelp
         )
+        SettingsToggleRow(
+            title = stringResource(R.string.settings_controls_touch_map_pad),
+            checked = overlayConfig.padTouchMapping,
+            onCheckedChange = { onOverlayConfigChange(overlayConfig.withPadTouchMapping(it)) },
+            // independent of the on-screen rings: this is for playing with a pad alone
+            enabled = true,
+            summary = stringResource(R.string.settings_controls_touch_map_pad_summary),
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_controls_touch_map_pad),
+                body = stringResource(R.string.settings_controls_touch_map_pad_desc),
+                scope = SettingsScope.Global
+            ),
+            onShowHelp = onShowHelp
+        )
         SettingsSliderRow(
             title = stringResource(R.string.settings_controls_scale),
             valueLabel = stringResource(R.string.settings_controls_percent_value, overlayConfig.overlayScale),

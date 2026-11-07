@@ -110,6 +110,7 @@ internal fun rememberSettingsSearchEntries(
         add(entry(SettingsCategory.Controls, R.string.settings_controls_touch_switch_tilt, R.string.settings_controls_touch_switch_tilt_desc, scope = SettingsScope.Global, keywords = "tilt gyro motion touchscreen switch"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_hide_toggle, R.string.settings_controls_hide_toggle_desc, scope = SettingsScope.Global, keywords = "hide overlay button toggle"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_touch_map, R.string.settings_controls_touch_map_desc, scope = SettingsScope.Global, keywords = "touch mapping tap screen button swipe pinch 触摸 映射"))
+        add(entry(SettingsCategory.Controls, R.string.settings_controls_touch_map_pad, R.string.settings_controls_touch_map_pad_desc, scope = SettingsScope.Global, keywords = "touch mapping l3 r3 gamepad dualshock ds4 controller 手柄 触摸 映射"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_scale, R.string.settings_controls_scale_desc, scope = SettingsScope.Global, keywords = "overlay size"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_opacity, R.string.settings_controls_opacity_desc, scope = SettingsScope.Global, keywords = "overlay transparency"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_mapping_buttons_title, R.string.settings_controls_mapping_buttons_desc, scope = SettingsScope.Global, keywords = "controller remap mapping buttons gamepad"))

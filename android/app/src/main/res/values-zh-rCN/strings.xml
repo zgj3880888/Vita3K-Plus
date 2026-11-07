@@ -596,6 +596,9 @@
     <string name="settings_controls_touch_map">触摸映射点</string>
     <string name="settings_controls_touch_map_summary">用按键代替点屏幕。把映射点拖到游戏要求你点的位置，同时按住两个即可双指缩放。</string>
     <string name="settings_controls_touch_map_desc">在虚拟按键上增加四个带编号的圆环。按住某个圆环，就等于用一根手指按住它在 Vita 触摸屏上对应的位置，所以需要点击屏幕的游戏不用离开手柄也能玩。在按键布局编辑里把圆环拖到游戏要求点击的地方即可；按住后拖动相当于手指滑动，可以完成划动操作。圆环跟随前触屏/后触屏开关，同一个点也能作用于背部触摸板。</string>
+    <string name="settings_controls_touch_map_pad">手柄 L3/R3 触摸映射</string>
+    <string name="settings_controls_touch_map_pad_summary">按住 L3 即按住映射点 1，按住 R3 即按住映射点 2，接上手柄就能单独点屏幕。</string>
+    <string name="settings_controls_touch_map_pad_desc">开启后，按下 L3 相当于在映射点 1 的位置用一根手指按住 Vita 触摸屏，R3 对应映射点 2。用按键布局编辑把这两个点放到游戏要求点击的位置，之后只用手柄就能玩：屏幕上一个字都不用显示，虚拟按键隐藏时映射点照样生效。L3/R3 原有的 Vita 按键功能同时保留，绝大多数游戏不会用到。如果某个游戏把 L3 或 R3 用作别的用途，把这个开关关掉即可。</string>
     <string name="settings_controls_scale">按键缩放</string>
     <string name="settings_controls_scale_desc">调整触屏按键大小，更贴合你的手与屏幕。</string>
     <string name="settings_controls_opacity">按键透明度</string>

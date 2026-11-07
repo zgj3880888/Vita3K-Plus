@@ -595,6 +595,9 @@
     <string name="settings_controls_touch_map">Touch Mapping Points</string>
     <string name="settings_controls_touch_map_summary">Press a point instead of tapping the screen. Drag the points onto the spot the game asks you to touch; hold two at once for a pinch.</string>
     <string name="settings_controls_touch_map_desc">Adds four numbered rings to the on-screen controls. Each ring reports a finger held on the Vita touch panel at its own position, so games that ask for a tap can be played without letting go of the pad. Move a ring in the controls editor to put it over the place the game expects a press; dragging while holding slides the finger, which is how swipes are made. The rings follow the front/back touch switch, so the same point works on the rear panel too.</string>
+    <string name="settings_controls_touch_map_pad">Pad L3/R3 Touch Mapping</string>
+    <string name="settings_controls_touch_map_pad_summary">L3 holds mapping point 1 and R3 holds point 2, so a connected gamepad can tap the screen on its own.</string>
+    <string name="settings_controls_touch_map_pad_desc">While this is on, pressing L3 reports a finger held on the Vita touch panel at the place of mapping point 1, and R3 does the same for point 2. Put the points where the game asks for a tap using the controls editor, then play with the gamepad alone: nothing has to be drawn on screen for this to work, so the points still fire with the on-screen controls hidden. L3 and R3 keep working as Vita L3/R3 at the same time, which most games ignore. Turn this off for a game that uses L3 or R3 for something else.</string>
     <string name="settings_controls_scale">Overlay Scale</string>
     <string name="settings_controls_scale_desc">Resize the touch controls to better fit your hands and screen.</string>
     <string name="settings_controls_opacity">Overlay Opacity</string>
