@@ -29,5 +29,5 @@
 
 #pragma once
 
-#define FORK_BUILD_SEQ 692
-#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + fix1: reap display/pipeline threads on GXM re-init (std::terminate), abort-aware display wait"
+#define FORK_BUILD_SEQ 693
+#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + fix1: reap display/pipeline threads on GXM re-init + fix2: emulate USSE g23/g24/g43 pixel/tile registers, gate buffer stores to the guest pixel centre"

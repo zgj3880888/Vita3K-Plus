@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <shader/spirv_recompiler.h>
+#include <shader/uniform_block.h>
 #include <shader/usse_constant_table.h>
 #include <shader/usse_program_analyzer.h>
 #include <shader/usse_utilities.h>
@@ -26,6 +27,7 @@
 #include <SPIRV/GLSL.std.450.h>
 #include <features/state.h>
 
+#include <atomic>
 #include <bitset>
 
 namespace shader::usse::utils {
@@ -685,7 +687,41 @@ static spv::Id make_or_get_buffer_ptr(spv::Builder &b, shader::usse::utils::Spir
     return utils.buffer_address_vec[buffer_utils_idx][is_write];
 }
 
+// A buffer store runs once per host fragment, but the guest expects one store per
+// guest pixel. Above a resolution multiplier of 1 the host shades more fragments
+// than the guest has pixels, so a program that accumulates into a buffer (Killzone
+// packs its smoke that way) writes the same pixel several times and saturates it.
+// Hold the store until the fragment lands on the centre of its guest pixel.
+static spv::Id holds_guest_pixel_centre(spv::Builder &b, const SpirvShaderParameters &params, const SpirvUtilFunctions &utils) {
+    const spv::Id f32 = b.makeFloatType(32);
+    const spv::Id bool_type = b.makeBoolType();
+    spv::Id res_multiplier = create_access_chain(b, spv::StorageClassUniform, params.render_info_id, { b.makeIntConstant(FRAG_UNIFORM_res_multiplier) });
+    res_multiplier = b.createLoad(res_multiplier, spv::NoPrecision);
+    const spv::Id frag_coord = b.createLoad(params.frag_coord_id, spv::NoPrecision);
+    const auto centred = [&](const int comp) {
+        const spv::Id coord = b.createCompositeExtract(frag_coord, f32, comp);
+        const spv::Id host = b.createBuiltinCall(f32, utils.std_builtins, GLSLstd450Floor, { coord });
+        const spv::Id guest = b.createBuiltinCall(f32, utils.std_builtins, GLSLstd450Floor, { b.createBinOp(spv::OpFDiv, f32, coord, res_multiplier) });
+        const spv::Id centre = b.createBinOp(spv::OpFMul, f32, b.createBinOp(spv::OpFAdd, f32, guest, b.makeFloatConstant(0.5f)), res_multiplier);
+        return b.createBinOp(spv::OpFOrdEqual, bool_type, host, b.createBuiltinCall(f32, utils.std_builtins, GLSLstd450Floor, { centre }));
+    };
+    return b.createBinOp(spv::OpLogicalAnd, bool_type, centred(0), centred(1));
+}
+
 void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
+    const spv::Id store_condition = (is_buffer_store && buffer_stores_at_guest_pixel_centre && params.frag_coord_id != spv::NoResult)
+        ? holds_guest_pixel_centre(b, params, utils)
+        : spv::NoResult;
+    const auto store_to_buffer = [&](const spv::Id data, const spv::Id pointer) {
+        if (store_condition == spv::NoResult) {
+            b.createStore(data, pointer, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
+            return;
+        }
+        spv::Builder::If centre(store_condition, spv::SelectionControlMaskNone, b);
+        b.createStore(data, pointer, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
+        centre.makeEndIf();
+    };
+
     const spv::Id i32 = b.makeIntType(32);
     const spv::Id u32 = b.makeUintType(32);
     const spv::Id zero = b.makeIntConstant(0);
@@ -738,7 +774,7 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
 
                 if (is_buffer_store) {
                     spv::Id data = load(b, params, utils, features, dest, 0b1111, dest_offset);
-                    b.createStore(data, accessed, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
+                    store_to_buffer(data, accessed);
                 } else {
                     accessed = b.createLoad(accessed, spv::NoPrecision, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
                     store(b, params, utils, features, dest, accessed, 0b1111, dest_offset);
@@ -760,7 +796,7 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
 
             if (is_buffer_store) {
                 spv::Id data = load(b, params, utils, features, dest, (1 << nb_components) - 1, dest_offset);
-                b.createStore(data, accessed, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
+                store_to_buffer(data, accessed);
             } else {
                 accessed = b.createLoad(accessed, spv::NoPrecision, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
                 store(b, params, utils, features, dest, accessed, (1 << nb_components) - 1, dest_offset);
@@ -929,6 +965,77 @@ static spv::Id apply_modifiers(spv::Builder &b, const SpirvUtilFunctions &utils,
     return result;
 }
 
+// The guest pixel/tile coordinates the GLOBAL bank exposes to fragment programs.
+// Derived from the host fragment coordinate divided by the resolution multiplier,
+// so a game that dithers or scatters per pixel sees the guest grid, not the
+// upscaled one.
+static spv::Id load_tile_pixel_register(spv::Builder &b, const SpirvShaderParameters &params, const SpirvUtilFunctions &utils, const Operand &op, const Imm4 dest_mask) {
+    const spv::Id f32 = b.makeFloatType(32);
+    const spv::Id u32 = b.makeUintType(32);
+    const spv::Id i32 = b.makeIntType(32);
+
+    spv::Id res_multiplier = create_access_chain(b, spv::StorageClassUniform, params.render_info_id, { b.makeIntConstant(FRAG_UNIFORM_res_multiplier) });
+    res_multiplier = b.createLoad(res_multiplier, spv::NoPrecision);
+    const spv::Id frag_coord = b.createLoad(params.frag_coord_id, spv::NoPrecision);
+    const auto guest_coord = [&](const int comp) {
+        spv::Id coord = b.createBinOp(spv::OpFDiv, f32, b.createCompositeExtract(frag_coord, f32, comp), res_multiplier);
+        coord = b.createBuiltinCall(f32, utils.std_builtins, GLSLstd450Floor, { coord });
+        return b.createUnaryOp(spv::OpConvertFToU, u32, coord);
+    };
+    const spv::Id x = guest_coord(0);
+    const spv::Id y = guest_coord(1);
+
+    spv::Id word;
+    if (op.num == GLOBAL_REG_TILE_XY) {
+        // (coord >> 5) * 2 in one byte each
+        const auto tile = [&](const spv::Id coord) {
+            return b.createBinOp(spv::OpBitwiseAnd, u32, b.createBinOp(spv::OpShiftRightLogical, u32, coord, b.makeUintConstant(4)), b.makeUintConstant(0xFE));
+        };
+        word = b.createBinOp(spv::OpBitwiseOr, u32, tile(x), b.createBinOp(spv::OpShiftLeftLogical, u32, tile(y), b.makeUintConstant(8)));
+    } else {
+        word = b.createBinOp(spv::OpBitwiseAnd, u32, op.num == GLOBAL_REG_PIXEL_X ? x : y, b.makeUintConstant(31));
+    }
+
+    // the components the swizzle picks, from the register's 8 or 16-bit lanes like any other register
+    const bool is_signed = is_signed_integer_data_type(op.type);
+    const bool is_float = is_float_data_type(op.type);
+    const uint32_t lane_bits = (op.type == DataType::UINT8 || op.type == DataType::INT8) ? 8
+        : ((op.type == DataType::UINT16 || op.type == DataType::INT16 || op.type == DataType::F16) ? 16 : 32);
+    const spv::Id comp_type = is_float ? f32 : (is_signed ? i32 : u32);
+    const auto constant = [&](const float value) {
+        return is_float ? b.makeFloatConstant(value) : (is_signed ? b.makeIntConstant(static_cast<int>(value)) : b.makeUintConstant(static_cast<uint32_t>(value)));
+    };
+    std::vector<spv::Id> comps;
+    for (int i = 0; i < 4; i++) {
+        if (!(dest_mask & (1 << i)))
+            continue;
+        const SwizzleChannel channel = op.swizzle[i];
+        if (channel >= SwizzleChannel::C_0) {
+            comps.push_back(constant(channel == SwizzleChannel::C_1 ? 1.0f : (channel == SwizzleChannel::C_2 ? 2.0f : (channel == SwizzleChannel::C_H ? 0.5f : 0.0f))));
+            continue;
+        }
+        const uint32_t lane = static_cast<uint32_t>(channel) - static_cast<uint32_t>(SwizzleChannel::C_X);
+        if (lane * lane_bits >= 32) {
+            comps.push_back(constant(0.0f));
+            continue;
+        }
+        spv::Id value = word;
+        if (op.type == DataType::F16) {
+            value = b.createBuiltinCall(b.makeVectorType(f32, 2), utils.std_builtins, GLSLstd450UnpackHalf2x16, { value });
+            value = b.createCompositeExtract(value, f32, lane);
+        } else if (lane_bits < 32) {
+            value = is_signed ? b.createTriOp(spv::OpBitFieldSExtract, i32, b.createUnaryOp(spv::OpBitcast, i32, value), b.makeUintConstant(lane * lane_bits), b.makeUintConstant(lane_bits))
+                              : b.createTriOp(spv::OpBitFieldUExtract, u32, value, b.makeUintConstant(lane * lane_bits), b.makeUintConstant(lane_bits));
+        } else if (comp_type != u32) {
+            value = b.createUnaryOp(spv::OpBitcast, comp_type, value);
+        }
+        comps.push_back(value);
+    }
+    if (comps.size() == 1)
+        return comps[0];
+    return b.createCompositeConstruct(b.makeVectorType(comp_type, static_cast<int>(comps.size())), comps);
+}
+
 spv::Id load(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand op, const Imm4 dest_mask, int shift_offset) {
     spv::Id type_f32 = b.makeFloatType(32);
 
@@ -953,7 +1060,13 @@ spv::Id load(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunc
             return apply_modifiers(b, utils, op.flags, flag);
         }
 
-        LOG_WARN_ONCE("Unhandled USSE global register g{} read as zero", op.num);
+        if (emulate_tile_pixel_registers && params.frag_coord_id != 0 && (op.num == GLOBAL_REG_PIXEL_X || op.num == GLOBAL_REG_PIXEL_Y || op.num == GLOBAL_REG_TILE_XY))
+            return apply_modifiers(b, utils, op.flags, load_tile_pixel_register(b, params, utils, op, dest_mask));
+
+        static std::atomic<uint64_t> warned_globals{ 0 };
+        const uint64_t bit = 1ull << (op.num & 63);
+        if (!(warned_globals.fetch_or(bit) & bit))
+            LOG_WARN("Unhandled USSE global register g{} read as zero", op.num);
     }
 
     if (op.bank == RegisterBank::FPCONSTANT) {
