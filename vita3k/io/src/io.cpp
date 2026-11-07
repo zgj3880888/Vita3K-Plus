@@ -257,6 +257,56 @@ bool find_case_isens_path(IOState &io, VitaIoDevice &device, const fs::path &tra
     return true;
 }
 
+static fs::path savedata_case_variant(const IOState &io, const VitaIoDevice device, const fs::path &path, const bool may_be_new = false) {
+    if (!io.case_isens_find_enabled || (device != VitaIoDevice::savedata0 && device != VitaIoDevice::savedata1))
+        return {};
+    const std::string &save_dir = (device == VitaIoDevice::savedata0) ? io.device_paths.savedata0 : io.device_paths.savedata1;
+    const std::string full = path.generic_string();
+    const auto pos = save_dir.empty() ? std::string::npos : full.find(save_dir);
+    if (pos == std::string::npos)
+        return {};
+    boost::system::error_code ec;
+    fs::path resolved = full.substr(0, pos + save_dir.size());
+    if (fs::exists(path, ec) || !fs::is_directory(resolved, ec))
+        return {};
+    bool other_case = false;
+    bool past_existing = false;
+    for (const auto &component : fs::path(full.substr(pos + save_dir.size()))) {
+        const std::string name = component.string();
+        if (name.empty() || name == "/" || name == ".")
+            continue;
+        if (past_existing || fs::exists(resolved / component, ec)) {
+            resolved /= component;
+            continue;
+        }
+        const std::string lower = string_utils::tolower(name);
+        fs::path match;
+        boost::system::error_code list_ec;
+        for (fs::directory_iterator entry(resolved, list_ec), end; !list_ec && entry != end; entry.increment(list_ec)) {
+            if (string_utils::tolower(entry->path().filename().string()) == lower) {
+                match = entry->path();
+                break;
+            }
+        }
+        if (match.empty()) {
+            if (!may_be_new)
+                return {};
+            past_existing = true;
+            resolved /= component;
+            continue;
+        }
+        other_case = true;
+        resolved = match;
+    }
+    if (!other_case)
+        return {};
+    static std::atomic<uint32_t> found{ 0 };
+    const uint32_t n = found.fetch_add(1, std::memory_order_relaxed) + 1;
+    if (n <= 8 || (n & (n - 1)) == 0)
+        LOG_INFO("Save data {} found as {}: the Vita ignores case in file names (#{})", path, resolved, n);
+    return resolved;
+}
+
 fs::path find_in_cache(IOState &io, const std::string &system_path) {
     const std::lock_guard<std::mutex> lock(io.cachemap_mutex);
     const auto find_path = io.cachemap.find(system_path);
@@ -402,6 +452,8 @@ SceUID open_file(IOState &io, const char *path, const int flags, const fs::path 
     }
 
     auto system_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+    if (const fs::path variant = savedata_case_variant(io, device_for_icase, system_path, (flags & SCE_O_CREAT) != 0); !variant.empty())
+        system_path = variant;
     boost::system::error_code fs_ec;
     if (fs::is_directory(system_path, fs_ec)) {
         LOG_ERROR("Cannot open directory: {}", system_path);
@@ -461,6 +513,49 @@ SceUID open_file(IOState &io, const char *path, const int flags, const fs::path 
 
     LOG_TRACE_IF(log_file_op, "{}: Opening file {} ({}), fd: {}", export_name, path, normalized_path, log_hex(fd));
     return fd;
+}
+
+TitleFileLoadingDelay find_title_file_loading_delay(const std::string &title_id) {
+    struct TitleDelay {
+        const char *title_id;
+        const char *game;
+        int delay;
+    };
+    static constexpr TitleDelay titles[] = {
+        { "PCSB00051", "EA SPORTS FIFA Football", 20 },
+        { "PCSB00052", "EA SPORTS FIFA Football", 20 },
+        { "PCSG00039", "EA SPORTS FIFA Football", 20 },
+        { "PCSB00082", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSB00083", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSB00084", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSB00085", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSB00086", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSE00055", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSE00059", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSE00060", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSG90012", "EA SPORTS FIFA Football Demo", 20 },
+        { "PCSB00170", "FIFA 13", 20 },
+        { "PCSB00171", "FIFA 13", 20 },
+        { "PCSB00174", "FIFA 13", 20 },
+        { "PCSE00093", "FIFA 13", 20 },
+        { "PCSE00096", "FIFA 13", 20 },
+        { "PCSG00107", "FIFA 13", 20 },
+        { "PCSE00011", "Silent Hill: Book of Memories", 5 },
+        { "PCSB00115", "Silent Hill: Book of Memories", 5 },
+        { "PCSG00049", "Silent Hill: Book of Memories", 5 },
+        { "PCSE00121", "Silent Hill: Book of Memories Demo", 5 },
+        { "PCSB00193", "Silent Hill: Book of Memories Demo", 5 },
+        { "PCSG90036", "Silent Hill: Book of Memories Demo", 5 },
+    };
+    for (const auto &title : titles) {
+        if (title_id == title.title_id)
+            return { title.game, title.delay };
+    }
+    return { "", 0 };
+}
+
+int effective_file_loading_delay(const int configured, const IOState &io) {
+    return configured > 0 ? configured : io.title_file_loading_delay;
 }
 
 static constexpr bool IODIAG_ENABLED = false; // seq-185 diagnostic; served its purpose (GB3 stale pointer, KZ jump cadence). Off for commit.
@@ -758,6 +853,8 @@ int stat_file(IOState &io, const char *file, SceIoStat *statp, const fs::path &v
 
         const auto translated_path = translate_path(file, device, io.device_paths);
         file_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+        if (const fs::path variant = savedata_case_variant(io, device_for_icase, file_path); !variant.empty())
+            file_path = variant;
 
         boost::system::error_code stat_ec;
         if (!fs::exists(file_path, stat_ec)) {
@@ -875,6 +972,7 @@ int close_file(IOState &io, const SceUID fd, const char *export_name) {
 
 int remove_file(IOState &io, const char *file, const fs::path &vita_fs_path, const char *export_name) {
     auto device = device::get_device(file);
+    const auto device_for_icase = device;
     if (device == VitaIoDevice::_INVALID) {
         LOG_ERROR("Cannot find device for path: {}", file);
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
@@ -886,7 +984,9 @@ int remove_file(IOState &io, const char *file, const fs::path &vita_fs_path, con
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
     }
 
-    const auto emulated_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+    auto emulated_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+    if (const fs::path variant = savedata_case_variant(io, device_for_icase, emulated_path); !variant.empty())
+        emulated_path = variant;
     boost::system::error_code probe_ec;
     if (!fs::exists(emulated_path, probe_ec) || fs::is_directory(emulated_path, probe_ec)) {
         LOG_ERROR("File does not exist at path: {} (target path: {})", emulated_path, file);
@@ -908,6 +1008,7 @@ int remove_file(IOState &io, const char *file, const fs::path &vita_fs_path, con
 
 int rename(IOState &io, const char *old_name, const char *new_name, const fs::path &vita_fs_path, const char *export_name) {
     auto device = device::get_device(old_name);
+    const auto device_for_icase = device;
     if (device == VitaIoDevice::_INVALID) {
         LOG_ERROR("Cannot find device for path: {}", old_name);
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
@@ -919,20 +1020,40 @@ int rename(IOState &io, const char *old_name, const char *new_name, const fs::pa
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
     }
 
-    const auto translated_new_path = translate_path(new_name, device, io.device_paths);
+    std::string full_new_name = new_name;
+    if (!full_new_name.contains(':')) {
+        const std::string_view old_view = old_name;
+        const bool bare_name = full_new_name.find_first_of("/\\") == std::string::npos;
+        full_new_name.insert(0, old_view.substr(0, (bare_name ? old_view.find_last_of("/\\:") : old_view.find(':')) + 1));
+    }
+
+    auto new_device = device::get_device(full_new_name);
+    const auto new_device_for_icase = new_device;
+    if (new_device == VitaIoDevice::_INVALID) {
+        LOG_ERROR("Cannot find device for path: {}", new_name);
+        return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
+    }
+
+    const auto translated_new_path = translate_path(full_new_name.c_str(), new_device, io.device_paths);
     if (translated_new_path.empty()) {
         LOG_ERROR("Cannot translate path: {}", translated_new_path);
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
     }
 
-    const auto emulated_old_path = device::construct_emulated_path(device, translated_old_path, vita_fs_path, io.redirect_stdio);
+    auto emulated_old_path = device::construct_emulated_path(device, translated_old_path, vita_fs_path, io.redirect_stdio);
+    if (const fs::path variant = savedata_case_variant(io, device_for_icase, emulated_old_path); !variant.empty())
+        emulated_old_path = variant;
     boost::system::error_code probe_ec;
     if (!fs::exists(emulated_old_path, probe_ec)) {
         LOG_ERROR("File does not exist at path: {} (target path: {})", emulated_old_path, old_name);
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
     }
 
-    const auto emulated_new_path = device::construct_emulated_path(device, translated_new_path, vita_fs_path, io.redirect_stdio);
+    auto emulated_new_path = device::construct_emulated_path(new_device, translated_new_path, vita_fs_path, io.redirect_stdio);
+    if (const fs::path variant = savedata_case_variant(io, new_device_for_icase, emulated_new_path, true); !variant.empty()) {
+        // the same file means only its case changes, which keeps the new spelling
+        emulated_new_path = (variant == emulated_old_path) ? variant.parent_path() / emulated_new_path.filename() : variant;
+    }
 
     LOG_TRACE_IF(log_file_op, "{}: Renaming file {} to {} ({} to {})", export_name, old_name, new_name, emulated_old_path, emulated_new_path);
 
@@ -955,6 +1076,8 @@ SceUID open_dir(IOState &io, const char *path, const fs::path &vita_fs_path, con
     const auto translated_path = translate_path(path, device, io.device_paths);
 
     auto dir_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio) / "";
+    if (const fs::path variant = savedata_case_variant(io, device_for_icase, dir_path); !variant.empty())
+        dir_path = variant / "";
     boost::system::error_code probe_ec;
     if (!fs::exists(dir_path, probe_ec)) {
         if (io.case_isens_find_enabled) {
@@ -966,7 +1089,7 @@ SceUID open_dir(IOState &io, const char *path, const fs::path &vita_fs_path, con
                 LOG_TRACE("Found cached directory path at {}", dir_path);
             } else {
                 const bool path_found = find_case_isens_path(io, device_for_icase, translated_path, dir_path);
-                dir_path = find_in_cache(io, string_utils::tolower(dir_path.string().substr(0, dir_path.string().size() - 1)));
+                dir_path = find_in_cache(io, string_utils::tolower(fs::path(dir_path).remove_trailing_separator().string()));
                 if (!dir_path.empty() && path_found) {
                     LOG_TRACE("Found directory on case-sensitive filesystem at {}", dir_path);
                 } else {
@@ -1058,13 +1181,16 @@ bool copy_path(const fs::path &src_path, const fs::path &vita_fs_path, const std
 
 int create_dir(IOState &io, const char *dir, int mode, const fs::path &vita_fs_path, const char *export_name, const bool recursive) {
     auto device = device::get_device(dir);
+    const auto device_for_icase = device;
     const auto translated_path = translate_path(dir, device, io.device_paths);
     if (translated_path.empty()) {
         LOG_ERROR("Failed to translate path: {}", dir);
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
     }
 
-    const auto emulated_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+    auto emulated_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+    if (const fs::path variant = savedata_case_variant(io, device_for_icase, emulated_path, true); !variant.empty())
+        emulated_path = variant;
     boost::system::error_code ec;
     if (recursive)
         return fs::create_directories(emulated_path, ec);
@@ -1105,6 +1231,7 @@ int close_dir(IOState &io, const SceUID fd, const char *export_name) {
 
 int remove_dir(IOState &io, const char *dir, const fs::path &vita_fs_path, const char *export_name) {
     auto device = device::get_device(dir);
+    const auto device_for_icase = device;
     if (device == VitaIoDevice::_INVALID) {
         LOG_ERROR("Cannot find device for path: {}", dir);
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);
@@ -1118,8 +1245,11 @@ int remove_dir(IOState &io, const char *dir, const fs::path &vita_fs_path, const
 
     LOG_TRACE_IF(log_file_op, "{}: Removing dir {} ({})", export_name, dir, device::construct_normalized_path(device, translated_path));
 
+    auto emulated_path = device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio);
+    if (const fs::path variant = savedata_case_variant(io, device_for_icase, emulated_path); !variant.empty())
+        emulated_path = variant;
     boost::system::error_code ec;
-    const auto removed = fs::remove_all(device::construct_emulated_path(device, translated_path, vita_fs_path, io.redirect_stdio), ec);
+    const auto removed = fs::remove_all(emulated_path, ec);
     if (ec || removed == 0) {
         LOG_ERROR("Cannot remove dir: {} ({})", dir, device::construct_normalized_path(device, translated_path));
         return IO_ERROR(SCE_ERROR_ERRNO_ENOENT);

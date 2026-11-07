@@ -54,6 +54,8 @@ public:
     std::vector<vk::Semaphore> image_acquired_semaphores;
     std::vector<vk::Semaphore> image_ready_semaphores;
     bool swapchain_has_storage = false;
+    // the driver refused a swapchain with storage usage, so every later swapchain is made without it
+    bool swapchain_storage_refused = false;
     // FSR can write this swapchain directly or through its blit
     bool swapchain_supports_fsr = false;
 
@@ -83,6 +85,9 @@ public:
     int size_mismatch_frames = 0;
     // a window size that disagrees with the swapchain extent while the surface itself agrees with it
     vk::Extent2D confirmed_window_size{};
+    // the surface size the swapchain was built for
+    vk::Extent2D swapchain_surface_extent{};
+    int surface_check_countdown = 0;
     // why the last rebuild happened, for the log
     const char *rebuild_reason = "initial";
     // the swapchain images were created with eTransferDst (required by render_transfer)
@@ -117,5 +122,6 @@ private:
     bool ensure_swapchain();
     bool rebuild_swapchain_if_visible();
     bool surface_matches_window_size();
+    bool android_surface_changed();
 };
 } // namespace renderer::vulkan

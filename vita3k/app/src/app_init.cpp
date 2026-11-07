@@ -21,6 +21,7 @@
 
 #include <audio/state.h>
 #include <camera/state.h>
+#include <cheat/functions.h>
 #include <compat/state.h>
 #include <config/settings.h>
 #include <config/state.h>
@@ -37,6 +38,7 @@
 #include <ime/state.h>
 #include <io/functions.h>
 #include <kernel/state.h>
+#include <kernel/thread/thread_state.h>
 #include <lang/state.h>
 #include <mem/functions.h>
 #include <modules/module_parent.h>
@@ -237,6 +239,9 @@ static Config::CurrentConfig get_runtime_current_config_after_save(
         case config::RestartRequiredSetting::GuestCores:
             runtime_current.guest_cores = previous_current.guest_cores;
             break;
+        case config::RestartRequiredSetting::PstvMode:
+            runtime_current.pstv_mode = previous_current.pstv_mode;
+            break;
         }
     }
 
@@ -265,6 +270,7 @@ void init_paths(Root &root_paths) {
     root_paths.set_shared_path(internal_storage_path);
     root_paths.set_cache_path(internal_storage_path / "cache" / "");
     root_paths.set_patch_path(internal_storage_path / "patch" / "");
+    root_paths.set_cheat_path(internal_storage_path / "cheats" / "");
 #else
     auto sdl_exe_path = SDL_GetBasePath();
     auto exe_path = fs_utils::utf8_to_path(sdl_exe_path);
@@ -297,6 +303,7 @@ void init_paths(Root &root_paths) {
         root_paths.set_shared_path(portable_path);
         root_paths.set_cache_path(portable_path / "cache" / "");
         root_paths.set_patch_path(portable_path / "patch" / "");
+        root_paths.set_cheat_path(portable_path / "cheats" / "");
     } else {
         // SDL_GetPrefPath is deferred as it creates the directory.
         // When using a portable directory, it is not needed.
@@ -329,6 +336,7 @@ void init_paths(Root &root_paths) {
         root_paths.set_shared_path(exe_path);
         root_paths.set_cache_path(exe_path / "cache" / "");
         root_paths.set_patch_path(exe_path / "patch" / "");
+        root_paths.set_cheat_path(exe_path / "cheats" / "");
 
 #if defined(__linux__)
         // XDG Data Dirs.
@@ -399,6 +407,7 @@ void init_paths(Root &root_paths) {
         // These default to being in shared path
         root_paths.set_vita_fs_path(root_paths.get_shared_path() / app_name / "");
         root_paths.set_patch_path(root_paths.get_shared_path() / "patch" / "");
+        root_paths.set_cheat_path(root_paths.get_shared_path() / "cheats" / "");
 #endif
     }
 #endif
@@ -409,6 +418,7 @@ void init_paths(Root &root_paths) {
     fs::create_directories(root_paths.get_log_path() / "shaderlog");
     fs::create_directories(root_paths.get_log_path() / "texturelog");
     fs::create_directories(root_paths.get_patch_path());
+    fs::create_directories(root_paths.get_cheat_path());
 
     const auto gui_configs_source_path = root_paths.get_static_assets_path() / "data" / "gui-configs";
     if (fs::is_directory(gui_configs_source_path)) {
@@ -445,6 +455,7 @@ bool init(EmuEnvState &state, Config &cfg, const Root &root_paths) {
     state.shared_path = root_paths.get_shared_path();
     state.static_assets_path = root_paths.get_static_assets_path();
     state.patch_path = root_paths.get_patch_path();
+    state.cheat_path = root_paths.get_cheat_path();
 
     // If configuration does not provide a VitaFS path, use SDL's default
     if (state.cfg.vita_fs_path == root_paths.get_vita_fs_path() || state.cfg.vita_fs_path.empty()) {
@@ -568,6 +579,7 @@ void reset_app_state(EmuEnvState &state) {
     state.clear_app_launch_request();
 
     state.ctrl.reset_runtime();
+    cheat::unload(state.cheat);
     set_current_config(state, "");
 
 #if USE_DISCORD
@@ -595,6 +607,39 @@ static std::string fault_context_provider() {
         pc, lr, imp_nid, import_name(imp_nid), imp_lr);
 }
 
+static bool fault_guest_registers(uint32_t regs[16]) {
+    CPUState *cpu = get_current_cpu_state();
+    if (!cpu)
+        return false;
+    for (int i = 0; i < 13; i++)
+        regs[i] = read_reg(*cpu, i);
+    regs[13] = read_sp(*cpu);
+    regs[14] = read_lr(*cpu);
+    regs[15] = read_pc(*cpu);
+    return true;
+}
+
+static std::string crash_context_provider() {
+    const ThreadState *thread = g_tls_guest_thread;
+    if (!thread)
+        return "a host thread, not a guest thread";
+    uint32_t pc = 0, lr = 0, sp = 0;
+    if (CPUState *cpu = get_current_cpu_state()) {
+        pc = read_pc(*cpu);
+        lr = read_lr(*cpu);
+        sp = read_sp(*cpu);
+    }
+    std::string text = fmt::format("thread '{}' (#{}) PC 0x{:X} LR 0x{:X} SP 0x{:X}, last import 0x{:08X} ({}) called from LR 0x{:X}",
+        thread->name, thread->id, pc, lr, sp, thread->last_import_nid, import_name(thread->last_import_nid), thread->last_import_lr);
+    text += "\nlast 16 imports, oldest first:";
+    for (int i = 0; i < 16; i++) {
+        const int slot = (thread->import_ring_pos + i) & 15;
+        if (thread->import_ring[slot])
+            text += fmt::format(" {}@0x{:X}", import_name(thread->import_ring[slot]), thread->import_ring_lr[slot]);
+    }
+    return text;
+}
+
 bool late_init(EmuEnvState &state) {
     // note: mem is not initialized yet but that's not an issue
     // the renderer is not using it yet, just storing it for later uses
@@ -602,6 +647,8 @@ bool late_init(EmuEnvState &state) {
     // for the stop-the-world bracket around page-table memory transitions
     state.renderer->kernel = &state.kernel;
     set_fault_context_provider(&fault_context_provider);
+    set_fault_guest_registers_provider(&fault_guest_registers);
+    logging::set_crash_context_provider(&crash_context_provider);
 
     const bool need_page_table = state.renderer->mapping_method == MappingMethod::PageTable || state.renderer->mapping_method == MappingMethod::NativeBuffer;
     if (!init(state.mem, need_page_table)) {
@@ -710,6 +757,7 @@ void apply_runtime_settings(EmuEnvState &emuenv) {
     emuenv.audio.set_global_volume(cc.audio_volume / 100.f);
     lang::set_locale(cc.sys_lang);
     emuenv.compat.log_compat_warn = emuenv.cfg.log_compat_warn;
+    emuenv.camera.apply_config(emuenv.cfg);
 
     if (!emuenv.renderer)
         return;

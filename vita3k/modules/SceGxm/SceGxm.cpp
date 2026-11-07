@@ -1815,6 +1815,8 @@ EXPORT(int, sceGxmBeginCommandList, SceGxmContext *deferredContext) {
     return 0;
 }
 
+static thread_local const SceGxmDepthStencilSurface *scene_ex_store_surface = nullptr;
+
 EXPORT(int, sceGxmBeginScene, SceGxmContext *context, uint32_t flags, const SceGxmRenderTarget *renderTarget, const SceGxmValidRegion *validRegion, SceGxmSyncObject *vertexSyncObject, Ptr<SceGxmSyncObject> fragmentSyncObject, const SceGxmColorSurface *colorSurface, const SceGxmDepthStencilSurface *depthStencil) {
     TRACY_FUNC(sceGxmBeginScene, context, flags, renderTarget, validRegion, vertexSyncObject, fragmentSyncObject, colorSurface, depthStencil);
     if (!context) {
@@ -1874,8 +1876,13 @@ EXPORT(int, sceGxmBeginScene, SceGxmContext *context, uint32_t flags, const SceG
         *depth_stencil_surface_copy = *depthStencil;
     }
 
-    renderer::set_context(*emuenv.renderer, context->renderer.get(), renderTarget->renderer.get(), color_surface_copy,
-        depth_stencil_surface_copy);
+    SceGxmDepthStencilSurface *store_surface_copy = nullptr;
+    if (scene_ex_store_surface) {
+        store_surface_copy = new SceGxmDepthStencilSurface;
+        *store_surface_copy = *scene_ex_store_surface;
+    }
+
+    renderer::set_context(*emuenv.renderer, context->renderer.get(), renderTarget->renderer.get(), color_surface_copy, depth_stencil_surface_copy, store_surface_copy);
 
     const std::uint32_t xmax = (validRegion ? validRegion->xMax : renderTarget->width - 1);
     const std::uint32_t ymax = (validRegion ? validRegion->yMax : renderTarget->height - 1);
@@ -1907,8 +1914,11 @@ EXPORT(int, sceGxmBeginSceneEx, SceGxmContext *immediateContext, uint32_t flags,
         return RET_ERROR(SCE_GXM_ERROR_WITHIN_SCENE);
     }
 
-    STUBBED("Using sceGxmBeginScene");
-    return CALL_EXPORT(sceGxmBeginScene, immediateContext, flags, renderTarget, validRegion, vertexSyncObject, fragmentSyncObject, colorSurface, loadDepthStencilSurface);
+    const bool separate_store = storeDepthStencilSurface && (!loadDepthStencilSurface || loadDepthStencilSurface->depth_data.address() != storeDepthStencilSurface->depth_data.address() || loadDepthStencilSurface->stencil_data.address() != storeDepthStencilSurface->stencil_data.address());
+    scene_ex_store_surface = separate_store ? storeDepthStencilSurface : nullptr;
+    const int result = CALL_EXPORT(sceGxmBeginScene, immediateContext, flags, renderTarget, validRegion, vertexSyncObject, fragmentSyncObject, colorSurface, loadDepthStencilSurface);
+    scene_ex_store_surface = nullptr;
+    return result;
 }
 
 DECL_EXPORT(int, sceGxmTextureInitLinear, SceGxmTexture *texture, Ptr<const void> data, SceGxmTextureFormat texFormat, uint32_t width, uint32_t height, uint32_t mipCount);
@@ -1977,7 +1987,7 @@ EXPORT(SceGxmColorSurfaceType, sceGxmColorSurfaceGetType, const SceGxmColorSurfa
 
 EXPORT(int, sceGxmColorSurfaceInit, SceGxmColorSurface *surface, SceGxmColorFormat colorFormat, SceGxmColorSurfaceType surfaceType, SceGxmColorSurfaceScaleMode scaleMode, SceGxmOutputRegisterSize outputRegisterSize, uint32_t width, uint32_t height, uint32_t strideInPixels, Ptr<void> data) {
     TRACY_FUNC(sceGxmColorSurfaceInit, surface, colorFormat, surfaceType, scaleMode, outputRegisterSize, width, height, strideInPixels, data);
-    if (!surface || !data)
+    if (!surface)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
 
     if (width == 0 || width > 4096 || height == 0 || height > 4096)
@@ -5638,27 +5648,25 @@ EXPORT(int, sceGxmTextureSetHeight, SceGxmTexture *texture, uint32_t height) {
     TRACY_FUNC(sceGxmTextureSetHeight, texture, height);
     if (!texture)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
-    if (height > 4096)
+    if (height - 1 >= 4096)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
 
-    if ((texture->type << 29) == SCE_GXM_TEXTURE_TILED) {
-        if (texture->mip_count > 1) {
-            if (height >> (texture->mip_count - 1) >> 0x1F) {
-                goto LINEAR;
-            }
-        }
-        return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
-    }
-
-    if (((texture->type << 29) != SCE_GXM_TEXTURE_SWIZZLED) && ((texture->type << 29) != SCE_GXM_TEXTURE_TILED)) {
-    LINEAR:
+    if (texture->texture_type() == SCE_GXM_TEXTURE_TILED) {
+        const uint32_t mip_count = (texture->mip_count + 1) & 15;
+        if ((height >> (mip_count ? mip_count - 1 : 0)) < 32)
+            return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
         texture->height = height - 1;
         return 0;
     }
 
-    // TODO: Add support for swizzled textures
-    LOG_WARN("Unimplemented texture format detected in sceGxmTextureSetHeight call.");
+    if (texture->texture_type() & 0xA0000000) {
+        texture->height = height - 1;
+        return 0;
+    }
 
+    if (height & (height - 1))
+        return RET_ERROR(SCE_GXM_ERROR_INVALID_ALIGNMENT);
+    texture->height_base2 = std::bit_width(height) - 1;
     return 0;
 }
 
@@ -5793,7 +5801,12 @@ EXPORT(int, sceGxmTextureSetStride, SceGxmTexture *texture, uint32_t byteStride)
     if ((byteStride < 4) || (byteStride > 131072))
         return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
 
-    return UNIMPLEMENTED();
+    const uint32_t stride_compressed = (byteStride >> 2) - 1;
+    texture->mip_filter = stride_compressed & 1;
+    texture->min_filter = (stride_compressed & 0b0000110) >> 1;
+    texture->mip_count = (stride_compressed & 0b1111000) >> 3;
+    texture->lod_bias = (stride_compressed & 0b1111110000000) >> 7;
+    return 0;
 }
 
 static bool verify_texture_mode(SceGxmTexture *texture, SceGxmTextureAddrMode mode) {
@@ -5878,30 +5891,27 @@ EXPORT(int, sceGxmTextureSetVAddrModeSafe, SceGxmTexture *texture, SceGxmTexture
 
 EXPORT(int, sceGxmTextureSetWidth, SceGxmTexture *texture, uint32_t width) {
     TRACY_FUNC(sceGxmTextureSetWidth, texture, width);
-    if (!texture) {
+    if (!texture)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
-    } else if (width > 4096) {
+    if (width - 1 >= 4096)
         return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
-    }
 
-    if ((texture->type << 29) == SCE_GXM_TEXTURE_TILED) {
-        if (texture->mip_count > 1) {
-            if (width >> (texture->mip_count - 1) >> 0x1F) {
-                goto LINEAR;
-            }
-        }
-        return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
-    }
-
-    if (((texture->type << 29) != SCE_GXM_TEXTURE_SWIZZLED) && ((texture->type << 29) != SCE_GXM_TEXTURE_TILED)) {
-    LINEAR:
+    if (texture->texture_type() == SCE_GXM_TEXTURE_TILED) {
+        const uint32_t mip_count = (texture->mip_count + 1) & 15;
+        if ((width >> (mip_count ? mip_count - 1 : 0)) < 32)
+            return RET_ERROR(SCE_GXM_ERROR_INVALID_VALUE);
         texture->width = width - 1;
         return 0;
     }
 
-    // TODO: Add support for swizzled textures
-    LOG_WARN("Unimplemented texture format detected in sceGxmTextureSetWidth call.");
+    if (texture->texture_type() & 0xA0000000) {
+        texture->width = width - 1;
+        return 0;
+    }
 
+    if (width & (width - 1))
+        return RET_ERROR(SCE_GXM_ERROR_INVALID_ALIGNMENT);
+    texture->width_base2 = std::bit_width(width) - 1;
     return 0;
 }
 

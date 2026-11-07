@@ -173,6 +173,23 @@ bool uses_pn_predicate(const std::uint64_t inst) {
     }
 }
 
+static bool is_depthf(const std::uint64_t inst) {
+    return (inst >> 59) == 0b11111 && ((inst >> (32 + 20)) & 0b11) == 0b11 && ((inst >> (32 + 24)) & 0b111) == 0b011;
+}
+
+bool writes_depth(const SceGxmProgram &program) {
+    const std::uint64_t *primary = program.primary_program_start();
+    for (std::uint32_t i = 0; i < program.primary_program_instr_count; i++) {
+        if (is_depthf(primary[i]))
+            return true;
+    }
+    for (const std::uint64_t *inst = program.secondary_program_start(); inst < program.secondary_program_end(); inst++) {
+        if (is_depthf(*inst))
+            return true;
+    }
+    return false;
+}
+
 bool is_buffer_fetch_or_store(const std::uint64_t inst, int &base, int &cursor, int &offset, int &size) {
     // TODO: Is there any exception? Like any instruction use pre or post increment addressing mode.
     cursor = 0;
@@ -345,6 +362,21 @@ std::uint32_t get_dynamic_uniform_buffers(const SceGxmProgram &program) {
     for (std::uint32_t buffer = 0; buffer < SCE_GXM_REAL_MAX_UNIFORM_BUFFER; buffer++) {
         if (dynamic & (1u << buffer))
             blocks |= 1u << (buffer < SCE_GXM_MAX_UNIFORM_BUFFERS ? buffer + SCE_GXM_UNIFORM_BUFFER_OFFSET : SCE_GXM_DEFAULT_UNIFORM_BUFFER_CONTAINER_INDEX);
+    }
+    return blocks;
+}
+
+std::uint32_t get_written_uniform_buffers(const SceGxmProgram &program) {
+    const SceGxmProgramParameter *const parameters = program.program_parameters();
+    if (!(program.program_flags & SCE_GXM_PROGRAM_FLAG_BUFFER_STORE) || !parameters)
+        return 0;
+
+    std::uint32_t blocks = 0;
+    for (std::uint32_t i = 0; i < program.parameter_count; i++) {
+        const SceGxmProgramParameter &parameter = parameters[i];
+        if (parameter.category == SCE_GXM_PARAMETER_CATEGORY_UNIFORM_BUFFER && static_cast<int>(parameter.semantic) == 3
+            && parameter.resource_index < SCE_GXM_MAX_UNIFORM_BUFFERS)
+            blocks |= 1u << (parameter.resource_index + SCE_GXM_UNIFORM_BUFFER_OFFSET);
     }
     return blocks;
 }

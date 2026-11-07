@@ -75,6 +75,8 @@ struct Framebuffer {
     uint32_t width;
     uint32_t height;
     vkutil::Image *raw_image = nullptr;
+    // depth-stencil image used by the framebuffer
+    vkutil::Image *ds_image = nullptr;
 };
 
 struct CastedTexture {
@@ -236,6 +238,12 @@ struct DepthStencilSurfaceCacheInfo : public SurfaceCacheInfo {
 
     // Resampled view of this surface for a pass that rasterises at a lower rate than the pass which filled it
     std::unique_ptr<vkutil::Image> sample_rate_copy;
+
+    std::unique_ptr<vkutil::Image> stored_copy;
+    vk::ImageView stored_depth_view = nullptr;
+    vk::ImageView stored_stencil_view = nullptr;
+    bool stored_copy_current = false;
+    uint32_t texture_reads = 0;
 };
 
 // result when looking in the surface cache for a texture
@@ -355,6 +363,20 @@ private:
 
     bool ensure_depth_alias_pipeline();
     bool ensure_depth_alias_scratch(vk::DeviceSize size);
+
+    vk::ShaderModule stencil_upload_shader = nullptr;
+    vk::DescriptorSetLayout stencil_upload_desc_layout = nullptr;
+    vk::PipelineLayout stencil_upload_pipeline_layout = nullptr;
+    vk::Pipeline stencil_upload_pipeline = nullptr;
+    vk::DescriptorPool stencil_upload_desc_pool = nullptr;
+    vk::DescriptorSet stencil_upload_desc_set = nullptr;
+    vkutil::Buffer stencil_upload_scratch;
+    bool stencil_upload_unavailable = false;
+    uint32_t stencil_upload_refusals = 0;
+    std::vector<std::pair<Address, uint32_t>> shader_written_memory;
+
+    bool ensure_stencil_upload_pipeline();
+    bool ensure_stencil_upload_scratch(vk::DeviceSize size);
     std::optional<TextureLookupResult> retrieve_depth_as_rgba_alias(const SceGxmTexture &texture, TextureViewport *texture_viewport, DepthStencilSurfaceCacheInfo &cached_info,
         uint32_t offset_bytes, SurfaceTiling tiling, uint32_t stride_samples, uint32_t width, uint32_t height);
 
@@ -391,12 +413,19 @@ public:
 
     bool begin_ds_scene_depth_check(const SceGxmDepthStencilSurface &depth_stencil, bool this_scene_stores, Address scene_color_addr);
     void resolve_ds_scene_end(bool scene_wrote_depth);
+    bool serves_stored_depth(const DepthStencilSurfaceCacheInfo &info) const;
+    void snapshot_stored_depth(DepthStencilSurfaceCacheInfo &info);
 
     bool try_transfer_depth_gpu(Address src_address, Address dst_address, uint32_t width, uint32_t height);
+
+    void note_shader_written_memory(Address address, uint32_t size);
+    void load_shader_written_stencil(const SceGxmDepthStencilSurface &depth_stencil, const vkutil::Image *ds_image);
+    void load_depth_stencil_from_surface(const SceGxmDepthStencilSurface &load_surface, vkutil::Image *store_image);
 
     void perform_pending_casts(VKContext &context, uint16_t vert_texture_count, uint16_t frag_texture_count);
     void flush_all_pending_casts();
     void refresh_casts_drawn_over(uint64_t scene_timestamp, int32_t x0, int32_t y0, int32_t x1, int32_t y1, bool exact_coordinates);
+    void reset_current_target_casts();
     void note_cpu_write(Address address);
 
     void mark_current_surface_blended() {

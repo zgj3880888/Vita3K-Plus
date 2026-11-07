@@ -29,11 +29,13 @@ static int32_t valid_buffer_index(const int32_t index) {
     return (index >= 0 && index < SCE_NGS_PLAYER_MAX_BUFFERS) ? index : -1;
 }
 
-static int32_t first_buffer_with_data(const SceNgsPlayerParams *params, int32_t index) {
+static int32_t first_buffer_with_data(const SceNgsPlayerParams *params, int32_t index, const bool null_ends) {
     for (int32_t visited = 0; visited <= SCE_NGS_PLAYER_MAX_BUFFERS && index != -1; visited++) {
         const SceNgsPlayerBufferParams &buffer = params->buffer_params[index];
         if (buffer.buffer && buffer.bytes_count > 0)
             return index;
+        if (null_ends && !buffer.buffer)
+            return -1;
         index = valid_buffer_index(buffer.next_buffer_index);
     }
     return -1;
@@ -210,10 +212,10 @@ bool PlayerModule::process(KernelState &kern, const MemState &mem, const SceUID 
 
     while (logical->decoded_pcm.available_frames() < wanted) {
         state->current_buffer = valid_buffer_index(state->current_buffer);
-        const int32_t playable = first_buffer_with_data(params, state->current_buffer);
+        const int32_t playable = first_buffer_with_data(params, state->current_buffer, null_buffer_ends_stream && state->bytes_consumed_since_key_on != 0);
         if (playable == -1) {
             if (state->bytes_consumed_since_key_on == 0) {
-                if (request_initial_buffer() && first_buffer_with_data(params, state->current_buffer) != -1)
+                if (request_initial_buffer() && first_buffer_with_data(params, state->current_buffer, false) != -1)
                     continue;
                 break;
             }

@@ -64,6 +64,7 @@ bool initialize_session(const fs::path &storage_path, Root &root_paths, std::uni
         root_paths.set_shared_path(storage_path);
         root_paths.set_cache_path(storage_path / "cache" / "");
         root_paths.set_patch_path(storage_path / "patch" / "");
+        root_paths.set_cheat_path(storage_path / "cheats" / "");
 
         if (!fs::exists(root_paths.get_vita_fs_path()))
             fs::create_directories(root_paths.get_vita_fs_path());
@@ -73,6 +74,7 @@ bool initialize_session(const fs::path &storage_path, Root &root_paths, std::uni
         fs::create_directories(root_paths.get_log_path() / "shaderlog");
         fs::create_directories(root_paths.get_log_path() / "texturelog");
         fs::create_directories(root_paths.get_patch_path());
+        fs::create_directories(root_paths.get_cheat_path());
         fs::create_directories(root_paths.get_shared_path() / "textures");
 
         if (logging::init(root_paths, true) != Success)
@@ -102,9 +104,14 @@ bool initialize_session(const fs::path &storage_path, Root &root_paths, std::uni
         android_driver::log_device_identity();
         mem_diag::log_memory_snapshot("session-start");
 
-        if (!cfg.tu_debug.empty()) {
-            setenv("TU_DEBUG", cfg.tu_debug.c_str(), 1);
-            LOG_INFO("TU_DEBUG set to '{}' for the Turnip driver", cfg.tu_debug);
+        // Adreno 6xx Turnip: LRZ fast clear leaves stale early-depth data after a depth clear
+        std::string tu_debug = cfg.tu_debug;
+        const bool add_nolrzfc = android_driver::is_adreno_6xx() && tu_debug.find("nolrz") == std::string::npos;
+        if (add_nolrzfc)
+            tu_debug += tu_debug.empty() ? "nolrzfc" : ",nolrzfc";
+        if (!tu_debug.empty()) {
+            setenv("TU_DEBUG", tu_debug.c_str(), 1);
+            LOG_INFO("TU_DEBUG set to '{}' for the Turnip driver{}", tu_debug, add_nolrzfc ? " (nolrzfc added: Adreno 6xx LRZ fast clear breaks depth tests)" : "");
         }
 
         if (!app::init(*emuenv, cfg, root_paths)) {

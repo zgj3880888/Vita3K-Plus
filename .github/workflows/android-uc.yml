@@ -1,13 +1,24 @@
 name: Build Vita3K+ UC
 
 # Coexisting ("UC") Vita3K+ Android build.
-# Based on upstream Vita3K-Plus v1.3 (781a049) with four local patches:
+# Baseline is now upstream Vita3K-Plus v1.4 (all-enhancements @ 5581fb11), i.e.
+# every commit upstream shipped after the v1.3 tag (781a049). The UC patch set
+# is what is left on top of it:
 #   1. applicationId  org.vita3kplus.emulator -> org.vita3kplus.emulator.uc
 #   2. accurate-thread-scheduling default      true -> false
 #   3. high-accuracy default                   true -> false
 #   4. app_name                                Vita3K+ -> Vita3K+ UC
 # The Java package (namespace) deliberately stays org.vita3k.emulator because
 # the native library binds its JNI symbols to it.
+#
+# v1.4 merge (seq 694) - upstream fixes taken wholesale, notably:
+#   - Killzone: USSE g23/g24/g43 pixel+tile registers, buffer stores held to the
+#     guest pixel centre, macrotiles submitted in Vita order (smoke/fog), FPS hack
+#   - renderer: depth-buffer rework, fast-clear off for A6xx, texture-cache
+#     thrashing and low-memory mode, double-buffer fixes
+#   - shader: emulated vertex-shader memory stores (J-Stars / Epic Mickey on Mali)
+#   - codec: AV_NOPTS_VALUE handling in h264
+#   - upstream PRs: cheat database, home-screen game shortcuts, gamepad/camera
 #
 # fix1 (seq 692) - crash hardening taken from the Killzone field log:
 #   5. SceGxm: reap display_host_thread in sceGxmTerminate and again before the
@@ -16,7 +27,6 @@ name: Build Vita3K+ UC
 #      the display wait_sync loop observe display_queue.abort().
 #   6. PipelineCache: never stack a second warm/worker thread batch on top of a
 #      live one when init() runs again after a shader cache rebuild.
-#   7. versionName gets the -fix1 suffix so the installed build is identifiable.
 # Signing: ci/uc-signing.b64 holds the pinned keystore and its certificate digest
 # is asserted below, so every build keeps one signature and installs over the
 # previous release.

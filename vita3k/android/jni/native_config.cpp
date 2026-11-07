@@ -67,6 +67,7 @@ struct EmulatorConfigFields {
     jfieldID ngsEnable = nullptr;
     jfieldID disableMotion = nullptr;
     jfieldID controllerAnalogMultiplier = nullptr;
+    jfieldID controllerSwapTriggers = nullptr;
     jfieldID controllerBinds = nullptr;
     jfieldID controllerAxisBinds = nullptr;
     jfieldID frontCameraType = nullptr;
@@ -154,6 +155,7 @@ EmulatorConfigFields resolve_config_fields(JNIEnv *env) {
     fields.ngsEnable = env->GetFieldID(fields.cls, "ngsEnable", "Z");
     fields.disableMotion = env->GetFieldID(fields.cls, "disableMotion", "Z");
     fields.controllerAnalogMultiplier = env->GetFieldID(fields.cls, "controllerAnalogMultiplier", "F");
+    fields.controllerSwapTriggers = env->GetFieldID(fields.cls, "controllerSwapTriggers", "Z");
     fields.controllerBinds = env->GetFieldID(fields.cls, "controllerBinds", "[I");
     fields.controllerAxisBinds = env->GetFieldID(fields.cls, "controllerAxisBinds", "[I");
     fields.frontCameraType = env->GetFieldID(fields.cls, "frontCameraType", "I");
@@ -344,6 +346,7 @@ void fill_config_object(JNIEnv *env, jobject obj, const EmulatorConfigFields &fi
     env->SetBooleanField(obj, fields.ngsEnable, current_config.ngs_enable);
     env->SetBooleanField(obj, fields.disableMotion, config.disable_motion);
     env->SetFloatField(obj, fields.controllerAnalogMultiplier, config.controller_analog_multiplier);
+    env->SetBooleanField(obj, fields.controllerSwapTriggers, config.controller_swap_triggers);
     set_int_array_field(env, obj, fields.controllerBinds, normalized_controller_binds(config));
     set_int_array_field(env, obj, fields.controllerAxisBinds, normalized_controller_axis_binds(config));
     env->SetIntField(obj, fields.frontCameraType, static_cast<jint>(config.front_camera_type));
@@ -492,6 +495,7 @@ void read_config_object(JNIEnv *env, jobject obj, const EmulatorConfigFields &fi
     current_config.ngs_enable = env->GetBooleanField(obj, fields.ngsEnable) != JNI_FALSE;
     config.disable_motion = env->GetBooleanField(obj, fields.disableMotion) != JNI_FALSE;
     config.controller_analog_multiplier = env->GetFloatField(obj, fields.controllerAnalogMultiplier);
+    config.controller_swap_triggers = env->GetBooleanField(obj, fields.controllerSwapTriggers) != JNI_FALSE;
     read_int_array_field(env, obj, fields.controllerBinds, config.controller_binds);
     read_int_array_field(env, obj, fields.controllerAxisBinds, config.controller_axis_binds);
     config.front_camera_type = static_cast<int>(env->GetIntField(obj, fields.frontCameraType));
@@ -614,7 +618,7 @@ int get_default_supported_memory_mapping_mask(EmuEnvState *emuenv) {
     return static_cast<int>(1 << 0);
 }
 
-bool default_gpu_is_mali(EmuEnvState *emuenv) {
+bool default_gpu_is_adreno(EmuEnvState *emuenv) {
     std::string gpu_name;
     if (emuenv && emuenv->renderer && emuenv->backend_renderer == renderer::Backend::Vulkan) {
         gpu_name = std::string(emuenv->renderer->get_gpu_name());
@@ -626,7 +630,7 @@ bool default_gpu_is_mali(EmuEnvState *emuenv) {
     std::transform(gpu_name.begin(), gpu_name.end(), gpu_name.begin(), [](unsigned char ch) {
         return static_cast<char>(std::tolower(ch));
     });
-    return gpu_name.find("mali") != std::string::npos;
+    return gpu_name.find("adreno") != std::string::npos;
 }
 
 } // namespace
@@ -849,7 +853,13 @@ Java_org_vita3k_emulator_NativeLib_getCustomDriverSupportInfo(JNIEnv *env, jclas
 
 JNIEXPORT jboolean JNICALL
 Java_org_vita3k_emulator_NativeLib_shouldShowCustomDriverOptions(JNIEnv *, jclass) {
-    return default_gpu_is_mali(get_emuenv()) ? JNI_FALSE : JNI_TRUE;
+    // adrenotools swaps in any Vulkan driver (Turnip on Adreno, PanVK on Mali) so every GPU gets the driver manager
+    return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_org_vita3k_emulator_NativeLib_shouldShowTurboModeOption(JNIEnv *, jclass) {
+    return default_gpu_is_adreno(get_emuenv()) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jobjectArray JNICALL

@@ -25,6 +25,7 @@
 #include <gxm/functions.h>
 #include <renderer/functions.h>
 #include <renderer/vulkan/gxm_to_vulkan.h>
+#include <shader/spirv_recompiler.h>
 
 #include <config/state.h>
 #include <spdlog/fmt/bin_to_hex.h>
@@ -87,6 +88,8 @@ void set_uniform_buffer(VKContext &context, MemState &mem, const ShaderProgram *
         }
 
         const uint64_t buffer_address = context.state.get_matching_device_address(data.address());
+        if (program->written_uniform_buffers & (1u << block_num))
+            context.state.surface_cache.note_shader_written_memory(data.address(), program->uniform_buffer_sizes.at(block_num) * 4);
 
         if (vertex_shader) {
             context.curr_vert_ublock.set_buffer_address(block_num, buffer_address);
@@ -352,7 +355,18 @@ static void bind_vertex_streams(VKContext &context, MemState &mem, uint32_t inst
             const uint8_t *snapshot = mapped
                 ? renderer::stream_snapshot_get(state.vertex_streams[i].snapshot, stream_size)
                 : nullptr;
-            if (mapped && !snapshot && !restride) {
+            bool copy_misaligned = false;
+            if (mapped && !snapshot && !restride && (state.vertex_streams[i].data.address() & 3)) {
+                copy_misaligned = !renderer::stream_snapshot_disabled();
+                static uint32_t misaligned_copied = 0;
+                static uint32_t misaligned_in_place = 0;
+                const uint32_t n = ++(copy_misaligned ? misaligned_copied : misaligned_in_place);
+                if (n <= 4 || (n & (n - 1)) == 0)
+                    LOG_INFO("Vertex stream {} at 0x{:08X} ({} bytes, stride {}) is not 4-byte aligned: {} (#{})", i, state.vertex_streams[i].data.address(),
+                        stream_size, vertex_program.streams[i].stride,
+                        copy_misaligned ? "copied to the ring buffer" : "bound in place, this game writes memory from the GPU", n);
+            }
+            if (mapped && !snapshot && !restride && !copy_misaligned) {
                 auto [buffer, offset] = context.state.get_matching_mapping(state.vertex_streams[i].data.cast<void>());
 
                 context.vertex_stream_offsets[i] = offset;
@@ -418,6 +432,15 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     // the mask bit is not emulated here, so a mask-update program would just paint writing_mask over the whole target (gl/draw.cpp skips these too)
     if (!context.state.features.use_mask_bit && context.record.fragment_program_binding->is_maskupdate)
         return;
+
+    if (context.macrotile_replay.active && (context.scissor.extent.width == 0 || context.scissor.extent.height == 0)
+        && !shader::emulates_vertex_stores(*context.record.vertex_program_binding->program(), context.state.features)) {
+        for (GXMStreamInfo &stream : context.record.vertex_streams) {
+            stream.data = nullptr;
+            stream.size = 0;
+        }
+        return;
+    }
 
     // DOA5 black clothes fix:
     {
@@ -496,7 +519,7 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     // when the render pass restarts within one scene (shader interlock or slow macroblock
     // multi-pass, or a mid-scene interruption such as a casted-texture copy), the re-begin
     // must load the depth-stencil, never re-run the scene-begin clear
-    if (context.is_first_scene_draw && (context.state.features.support_shader_interlock || context.ignore_macroblock || !context.render_target->has_macroblock_sync)) {
+    if (context.is_first_scene_draw && (context.state.features.support_shader_interlock || context.ignore_macroblock || !context.render_target->has_macroblock_sync || context.macrotile_replay.active)) {
         // update the render pass to load and store the depth and stencil
         context.current_render_pass = context.state.pipeline_cache.retrieve_render_pass(context.current_color_format, true, true, true, !context.record.color_surface.data, false,
             context.record.color_base_format == SCE_GXM_COLOR_BASE_FORMAT_F16F16F16F16);
@@ -505,6 +528,11 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
 
     const ProgramBinding &fragment_program = *context.record.fragment_program_binding;
     const SceGxmProgram &fragment_program_gxp = *fragment_program.program();
+
+    const bool depth_mirror_draw = reinterpret_cast<const VKFragmentProgram *>(fragment_program.fragment_program.get())->depth_mirror && context.record.front_side_fragment_program_mode != SCE_GXM_FRAGMENT_PROGRAM_DISABLED && !fragment_program_gxp.has_no_effect();
+    if (!depth_mirror_draw && context.record.front_depth_write_mode == SCE_GXM_DEPTH_WRITE_ENABLED)
+        context.depth_mirror_stale = true;
+    const bool depth_mirror_refresh = depth_mirror_draw && context.depth_mirror_stale;
 
     if (context.state.features.preserve_f16_nan_as_u16) {
         const VKFragmentProgram &vk_frag_program = *reinterpret_cast<VKFragmentProgram *>(fragment_program.fragment_program.get());
@@ -530,9 +558,11 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
         context.render_cmd.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput, vk::PipelineStageFlagBits::eFragmentShader,
             vk::DependencyFlagBits::eByRegion, {}, {}, vk::ArrayProxy<const vk::ImageMemoryBarrier>(barrier_count, barriers.data()));
     } else if (context.state.features.support_shader_interlock
-        && fragment_program_gxp.is_frag_color_used() != context.last_draw_was_framebuffer_fetch) {
+        && (fragment_program_gxp.is_frag_color_used() != context.last_draw_was_framebuffer_fetch || depth_mirror_refresh)) {
         // restart the render pass to act as a barrier
         context.render_cmd.endRenderPass();
+        if (depth_mirror_refresh)
+            context.refresh_depth_mirror();
 
         if (fragment_program_gxp.is_frag_color_used()) {
             context.curr_renderpass_info.framebuffer = context.current_shader_interlock_framebuffer;
@@ -544,6 +574,18 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
 
         context.render_cmd.beginRenderPass(context.curr_renderpass_info, vk::SubpassContents::eInline);
         context.last_draw_was_framebuffer_fetch = fragment_program_gxp.is_frag_color_used();
+    }
+
+    if (depth_mirror_draw) {
+        const auto follows = [](const auto &op) {
+            return op.func == SCE_GXM_STENCIL_FUNC_ALWAYS && op.depth_fail == SCE_GXM_STENCIL_OP_KEEP;
+        };
+        const auto &front = context.record.front_stencil_state_op;
+        if (!follows(front) || (context.record.two_sided == SCE_GXM_TWO_SIDED_ENABLED && !follows(context.record.back_stencil_state_op))) {
+            static uint32_t stencil_draws = 0;
+            if (++stencil_draws <= 8 || stencil_draws % 1000 == 0)
+                LOG_WARN("Stencil test on a draw whose blending program writes its own depth is not supported by the depth mirror (front func 0x{:X} zfail 0x{:X}, draw #{})", static_cast<uint32_t>(front.func), static_cast<uint32_t>(front.depth_fail), stencil_draws);
+        }
     }
 
     if (context.current_visibility_buffer != nullptr && context.current_query_idx != -1 && !context.is_in_query) {
@@ -560,6 +602,8 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
         context.is_in_query = true;
     }
 
+    const bool vertex_stores = shader::emulates_vertex_stores(*context.record.vertex_program_binding->program(), context.state.features);
+
     // do we need to check for a pipeline change?
     if (context.refresh_pipeline || type != context.last_primitive) {
         context.refresh_pipeline = false;
@@ -569,6 +613,7 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
         // to be able to see anything
         bool can_be_whole_quad = instance_count == 1 && count <= 6;
         vk::Pipeline new_pipeline = context.state.pipeline_cache.retrieve_pipeline(context, type, !can_be_whole_quad, mem);
+        context.vertex_store_pipeline = vertex_stores ? context.state.pipeline_cache.retrieve_pipeline(context, type, false, mem, true) : vk::Pipeline{};
         context.pipeline_stops_lrz_write = fetch_draw_stops_lrz_write(context.state, context.record, fragment_program_gxp);
 
         if (new_pipeline != context.current_pipeline) {
@@ -595,6 +640,8 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     if (context.pipeline_stops_lrz_write != context.stencil_compare_mask_zeroed) {
         context.stencil_compare_mask_zeroed = context.pipeline_stops_lrz_write;
         sync_stencil_func(context, false);
+        if (context.record.two_sided == SCE_GXM_TWO_SIDED_ENABLED)
+            sync_stencil_func(context, true);
     }
 
     if (config.log_active_shaders) {
@@ -644,13 +691,6 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     {
         const auto &bound_fragment = context.record.fragment_program_binding->fragment_program;
         frag_ublock.color_write_mask = static_cast<float>(bound_fragment->color_write_mask);
-        if (bound_fragment->color_write_mask != 0xF && context.record.fragment_program_binding->program()->is_native_color()) {
-            static std::mutex colormask_mutex;
-            static std::set<std::pair<const void *, int>> colormask_seen;
-            const std::lock_guard<std::mutex> colormask_lock(colormask_mutex);
-            if (colormask_seen.emplace(bound_fragment.get(), bound_fragment->color_write_mask).second)
-                LOG_INFO("[COLORMASK] native-colour fragment program {} drawn with colour write mask 0x{:X} (R=1 G=2 B=4 A=8): its storage-image write now honours it", static_cast<const void *>(bound_fragment.get()), bound_fragment->color_write_mask);
-        }
     }
     frag_ublock.res_multiplier = context.state.res_multiplier;
     frag_ublock.use_raw_image = (context.state.features.preserve_f16_nan_as_u16
@@ -748,6 +788,19 @@ void draw(VKContext &context, SceGxmPrimitiveType type, SceGxmIndexFormat format
     context.last_draw_pipeline = context.current_pipeline;
 
     context.render_cmd.drawIndexed(count, instance_count, 0, 0, 0);
+
+    if (vertex_stores && context.vertex_store_pipeline) {
+        const vk::Rect2D area = context.curr_renderpass_info.renderArea;
+        const float grid = (area.extent.width >= 32 && area.extent.height >= 32) ? 32.0f : 1.0f;
+        context.render_cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, context.vertex_store_pipeline);
+        context.render_cmd.setViewport(0, vk::Viewport{ static_cast<float>(area.offset.x), static_cast<float>(area.offset.y), grid, grid, 0.0f, 1.0f });
+        context.render_cmd.setScissor(0, area);
+        context.render_cmd.drawIndexed(count, instance_count, 0, 0, 0);
+        context.render_cmd.setViewport(0, context.viewport);
+        context.render_cmd.setScissor(0, context.scissor);
+        context.render_cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, context.current_pipeline);
+        context.vertex_store_draws++;
+    }
 
     context.vertex_uniform_storage_allocated = false;
     context.fragment_uniform_storage_allocated = false;

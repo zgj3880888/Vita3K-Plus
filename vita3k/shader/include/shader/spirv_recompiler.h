@@ -18,6 +18,7 @@
 #pragma once
 
 #include <gxm/types.h>
+#include <shader/usse_program_analyzer.h>
 #include <shader/usse_translator_types.h>
 #include <shader/usse_types.h>
 
@@ -31,13 +32,16 @@ namespace shader {
 static constexpr int COLOR_ATTACHMENT_TEXTURE_SLOT_IMAGE = 0;
 static constexpr int MASK_TEXTURE_SLOT_IMAGE = 1;
 static constexpr int COLOR_ATTACHMENT_RAW_TEXTURE_SLOT_IMAGE = 3;
-static constexpr uint32_t CURRENT_VERSION = 18;
+static constexpr uint32_t CURRENT_VERSION = 19;
 // fragment shader using the rendering surface as a storage image (because of shader interlock) have a line
 // layout (constant_id = GAMMA_CORRECTION_SPECIALIZATIO_ID) const bool is_srgb = false;
 // Setting this constant to true performs gamma correction in the shader
 static constexpr uint32_t GAMMA_CORRECTION_SPECIALIZATION_ID = 0;
 // Setting this constant to true compiles the surface cast texture paths into a fragment shader
 static constexpr uint32_t SURFACE_CAST_SPECIALIZATION_ID = 1;
+// The draw's depth compare op and depth write enable, for a program using the depth mirror
+static constexpr uint32_t DEPTH_MIRROR_FUNC_SPECIALIZATION_ID = 2;
+static constexpr uint32_t DEPTH_MIRROR_WRITE_SPECIALIZATION_ID = 3;
 
 enum struct Target {
     GLSLOpenGL,
@@ -65,6 +69,7 @@ struct Hints {
     SceGxmOutputRegisterFormat output_register_format = SCE_GXM_OUTPUT_REGISTER_FORMAT_DECLARED;
 
     bool raw_color_attachment_input = false;
+    bool vertex_store_pass = false;
 };
 
 struct GeneratedShader {
@@ -80,5 +85,17 @@ GeneratedShader convert_gxp(const SceGxmProgram &program, const std::string &sha
     bool force_shader_debug = false, const std::function<bool(const std::string &ext, const std::string &dump)> &dumper = nullptr);
 
 void convert_gxp_to_glsl_from_filepath(const std::string &shader_filepath_utf8);
+
+inline bool emulates_vertex_stores(const SceGxmProgram &program, const FeatureState &features) {
+    return features.vertex_store_slots > 0 && features.enable_memory_mapping && program.is_vertex()
+        && (program.program_flags & SCE_GXM_PROGRAM_FLAG_BUFFER_STORE) && (program.program_flags & SCE_GXM_PROGRAM_FLAG_OUTPUT_UNDEFINED);
+}
+
+inline bool uses_depth_mirror(const SceGxmProgram &program, const FeatureState &features) {
+    return features.support_depth_mirror && features.should_use_shader_interlock() && program.is_fragment()
+        && program.is_frag_color_used() && usse::writes_depth(program);
+}
+
+usse::SpirvCode generate_vertex_store_fragment_shader(int slots);
 
 } // namespace shader

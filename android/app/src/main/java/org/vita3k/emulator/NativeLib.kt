@@ -77,14 +77,14 @@ object NativeLib {
     external fun convertRifToZrif(path: String): String
 
     // --- Settings / Config ---
-    /** Returns the current global EmulatorConfig (all CurrentConfig + global fields). */
-    external fun getGlobalConfig(): EmulatorConfig
+    /** Returns the current global EmulatorConfig (all CurrentConfig + global fields), or null before the core is initialised. */
+    external fun getGlobalConfig(): EmulatorConfig?
     /** Returns the currently active emulated storage folder path. */
     external fun getCurrentEmulatorPath(): String
     /** Updates the active emulated storage folder path without changing the app storage root. */
     external fun setCurrentEmulatorPath(path: String): Boolean
-    /** Returns a fresh EmulatorConfig populated with emulator default values. */
-    external fun getDefaultConfig(): EmulatorConfig
+    /** Returns a fresh EmulatorConfig populated with emulator default values, or null if the config class cannot be resolved. */
+    external fun getDefaultConfig(): EmulatorConfig?
     /** Returns true when a per-app custom config file exists for [titleId]. */
     external fun hasCustomConfig(titleId: String): Boolean
     /** Returns the saved custom config for [titleId], or null when none exists. */
@@ -110,6 +110,8 @@ object NativeLib {
     external fun getCustomDriverSupportInfo(customDriverName: String): IntArray
     /** Returns true when the Android custom GPU driver option should be shown on this device. */
     external fun shouldShowCustomDriverOptions(): Boolean
+    /** Returns true when the GPU is an Adreno, the only GPU turbo mode works on. */
+    external fun shouldShowTurboModeOption(): Boolean
     /** Returns the names of the camera devices currently visible to SDL. */
     external fun getAvailableCameras(): Array<String>
     /** Returns a flat array [label0, mask0, label1, mask1, ...] of available ad-hoc addresses. */

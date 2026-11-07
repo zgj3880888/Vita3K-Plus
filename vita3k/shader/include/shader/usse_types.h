@@ -391,9 +391,6 @@ struct AttributeInputSource {
 
 // Face-flag register index in the USSE GLOBAL bank (non-zero = front-facing)
 constexpr uint32_t GLOBAL_REG_FRONT_FACING = 16;
-// Guest pixel/tile coordinates in the GLOBAL bank. Killzone's smoke and other
-// screen-space noise shaders read these to scatter particles per pixel and per
-// 32x32 macrotile; reading them as zero stacks every particle on the same spot.
 constexpr uint32_t GLOBAL_REG_PIXEL_X = 23;
 constexpr uint32_t GLOBAL_REG_PIXEL_Y = 24;
 constexpr uint32_t GLOBAL_REG_TILE_XY = 43;

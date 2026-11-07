@@ -687,11 +687,24 @@ static spv::Id make_or_get_buffer_ptr(spv::Builder &b, shader::usse::utils::Spir
     return utils.buffer_address_vec[buffer_utils_idx][is_write];
 }
 
-// A buffer store runs once per host fragment, but the guest expects one store per
-// guest pixel. Above a resolution multiplier of 1 the host shades more fragments
-// than the guest has pixels, so a program that accumulates into a buffer (Killzone
-// packs its smoke that way) writes the same pixel several times and saturates it.
-// Hold the store until the fragment lands on the centre of its guest pixel.
+static void record_vertex_stores(spv::Builder &b, SpirvUtilFunctions &utils, spv::Id address, uint32_t offset, spv::Id data) {
+    const spv::Id u32 = b.makeUintType(32);
+    const spv::Id scalar_type = b.getScalarTypeId(b.getTypeId(data));
+    const int count = static_cast<int>(b.getNumComponents(data));
+    for (int i = 0; i < count; i++, utils.vertex_store_count++) {
+        if (utils.vertex_store_count >= utils.vertex_store_capacity)
+            continue;
+        spv::Id value = (count == 1) ? data : b.createCompositeExtract(data, scalar_type, i);
+        if (scalar_type != u32)
+            value = b.createUnaryOp(spv::OpBitcast, u32, value);
+        const spv::Id target = add_uvec2_uint(b, address, b.makeUintConstant(offset + i * 4));
+        const spv::Id slot = b.createCompositeConstruct(b.makeVectorType(u32, 4), { b.createCompositeExtract(target, u32, 0), b.createCompositeExtract(target, u32, 1), value, b.makeUintConstant(1) });
+        b.createStore(slot, create_access_chain(b, spv::StorageClassOutput, utils.vertex_stores, { b.makeIntConstant(utils.vertex_store_count) }));
+    }
+    if (utils.loop_depth > 0)
+        utils.vertex_store_in_loop = true;
+}
+
 static spv::Id holds_guest_pixel_centre(spv::Builder &b, const SpirvShaderParameters &params, const SpirvUtilFunctions &utils) {
     const spv::Id f32 = b.makeFloatType(32);
     const spv::Id bool_type = b.makeBoolType();
@@ -709,7 +722,9 @@ static spv::Id holds_guest_pixel_centre(spv::Builder &b, const SpirvShaderParame
 }
 
 void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params, SpirvUtilFunctions &utils, const FeatureState &features, Operand dest, int dest_offset, spv::Id addr, uint32_t component_size, uint32_t nb_components, int buffer_idx, bool is_buffer_store) {
-    const spv::Id store_condition = (is_buffer_store && buffer_stores_at_guest_pixel_centre && params.frag_coord_id != spv::NoResult)
+    if (is_buffer_store && utils.drop_buffer_stores)
+        return;
+    const spv::Id store_condition = (is_buffer_store && buffer_stores_at_guest_pixel_centre && params.frag_coord_id != spv::NoResult && utils.vertex_stores == spv::NoResult)
         ? holds_guest_pixel_centre(b, params, utils)
         : spv::NoResult;
     const auto store_to_buffer = [&](const spv::Id data, const spv::Id pointer) {
@@ -721,7 +736,6 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
         b.createStore(data, pointer, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
         centre.makeEndIf();
     };
-
     const spv::Id i32 = b.makeIntType(32);
     const spv::Id u32 = b.makeUintType(32);
     const spv::Id zero = b.makeIntConstant(0);
@@ -774,7 +788,10 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
 
                 if (is_buffer_store) {
                     spv::Id data = load(b, params, utils, features, dest, 0b1111, dest_offset);
-                    store_to_buffer(data, accessed);
+                    if (utils.vertex_stores != spv::NoResult)
+                        record_vertex_stores(b, utils, buffer_address, buffer_idx_vec4 * 16, data);
+                    else
+                        store_to_buffer(data, accessed);
                 } else {
                     accessed = b.createLoad(accessed, spv::NoPrecision, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
                     store(b, params, utils, features, dest, accessed, 0b1111, dest_offset);
@@ -796,7 +813,10 @@ void buffer_address_access(spv::Builder &b, const SpirvShaderParameters &params,
 
             if (is_buffer_store) {
                 spv::Id data = load(b, params, utils, features, dest, (1 << nb_components) - 1, dest_offset);
-                store_to_buffer(data, accessed);
+                if (utils.vertex_stores != spv::NoResult)
+                    record_vertex_stores(b, utils, buffer_address, buffer_idx_vec4 * 16, data);
+                else
+                    store_to_buffer(data, accessed);
             } else {
                 accessed = b.createLoad(accessed, spv::NoPrecision, spv::MemoryAccessAlignedMask, spv::ScopeMax, 4);
                 store(b, params, utils, features, dest, accessed, (1 << nb_components) - 1, dest_offset);
@@ -965,10 +985,6 @@ static spv::Id apply_modifiers(spv::Builder &b, const SpirvUtilFunctions &utils,
     return result;
 }
 
-// The guest pixel/tile coordinates the GLOBAL bank exposes to fragment programs.
-// Derived from the host fragment coordinate divided by the resolution multiplier,
-// so a game that dithers or scatters per pixel sees the guest grid, not the
-// upscaled one.
 static spv::Id load_tile_pixel_register(spv::Builder &b, const SpirvShaderParameters &params, const SpirvUtilFunctions &utils, const Operand &op, const Imm4 dest_mask) {
     const spv::Id f32 = b.makeFloatType(32);
     const spv::Id u32 = b.makeUintType(32);
@@ -1000,7 +1016,7 @@ static spv::Id load_tile_pixel_register(spv::Builder &b, const SpirvShaderParame
     const bool is_signed = is_signed_integer_data_type(op.type);
     const bool is_float = is_float_data_type(op.type);
     const uint32_t lane_bits = (op.type == DataType::UINT8 || op.type == DataType::INT8) ? 8
-        : ((op.type == DataType::UINT16 || op.type == DataType::INT16 || op.type == DataType::F16) ? 16 : 32);
+                                                                                         : ((op.type == DataType::UINT16 || op.type == DataType::INT16 || op.type == DataType::F16) ? 16 : 32);
     const spv::Id comp_type = is_float ? f32 : (is_signed ? i32 : u32);
     const auto constant = [&](const float value) {
         return is_float ? b.makeFloatConstant(value) : (is_signed ? b.makeIntConstant(static_cast<int>(value)) : b.makeUintConstant(static_cast<uint32_t>(value)));

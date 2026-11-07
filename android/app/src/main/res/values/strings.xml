@@ -80,6 +80,9 @@
     <string name="app_menu_information">Information</string>
     <string name="app_menu_delete">Delete\u2026</string>
     <string name="app_menu_custom_config">Custom Config</string>
+    <string name="app_menu_create_shortcut">Create Home Screen Shortcut</string>
+    <string name="shortcut_create_requested">Shortcut request sent.</string>
+    <string name="shortcut_create_unsupported">Unable to request a home screen shortcut.</string>
 
     <!-- User management -->
     <string name="user_management_title">User Management</string>
@@ -485,7 +488,7 @@
     <string name="settings_system_enter_circle">Circle</string>
     <string name="settings_system_enter_cross">Cross</string>
     <string name="settings_system_pstv_mode">PlayStation TV Mode (PSTV)</string>
-    <string name="settings_system_pstv_mode_desc">Enable PlayStation TV mode.</string>
+    <string name="settings_system_pstv_mode_desc">Makes games detect a PlayStation TV with a DualShock controller. Some games only accept L2/R2 and L3/R3 in this mode, and some change their controls. Takes effect the next time a game starts.</string>
     <string name="settings_system_show_mode">Show Mode</string>
     <string name="settings_system_show_mode_desc">Enable Show Mode.</string>
     <string name="settings_system_demo_mode">Demo Mode</string>
@@ -567,6 +570,8 @@
     <string name="settings_controls_multiplier_value">%1$.1fx</string>
     <string name="settings_controls_disable_motion">Disable Motion Controls</string>
     <string name="settings_controls_disable_motion_desc">Ignore controller and device motion sensors for games that expect gyro or accelerometer input.</string>
+    <string name="settings_controls_swap_triggers">Swap L1/R1 with L2/R2</string>
+    <string name="settings_controls_swap_triggers_desc">The controller\'s triggers press L1/R1 (the Vita\'s L and R buttons) and its shoulder buttons press L2/R2. Useful for racing games and shooters.</string>
     <string name="settings_controls_capture_button_prompt">Press a controller button now, or choose a mapping from the list below.</string>
     <string name="settings_controls_capture_axis_prompt">Move a controller stick or trigger now, or choose a mapping from the list below.</string>
     <string name="settings_controls_capture_listening">Listening for controller input...</string>
@@ -630,6 +635,7 @@
     <string name="settings_emulator_share_log_desc">Open Android’s share sheet for the current Vita3K log file so it can be sent to Discord or another app.</string>
     <string name="settings_emulator_storage_folder_resolve_failed">Failed to resolve the selected storage folder.</string>
     <string name="settings_emulator_storage_folder_change_failed">Failed to switch the emulator storage folder.</string>
+    <string name="settings_emulator_not_ready">The emulator core could not start, so the settings cannot be loaded. Check the storage folder, then restart the app.</string>
     <string name="settings_emulator_storage_folder_change_success">Switched emulator storage folder to %1$s.</string>
     <string name="settings_emulator_stretch_display">Stretch the Display Area</string>
     <string name="settings_emulator_stretch_display_desc">Stretch the display area to fill the entire window, ignoring the original aspect ratio.</string>

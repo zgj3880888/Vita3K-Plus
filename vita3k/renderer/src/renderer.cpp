@@ -263,8 +263,8 @@ void set_side_fragment_program_enable(State &state, Context *ctx, const bool is_
     renderer::add_state_set_command(ctx, renderer::GXMState::FragmentProgramEnable, is_front, mode);
 }
 
-void set_context(State &state, Context *ctx, RenderTarget *target, SceGxmColorSurface *color_surface, SceGxmDepthStencilSurface *depth_stencil_surface) {
-    renderer::add_command(ctx, renderer::CommandOpcode::SetContext, nullptr, target, color_surface, depth_stencil_surface);
+void set_context(State &state, Context *ctx, RenderTarget *target, SceGxmColorSurface *color_surface, SceGxmDepthStencilSurface *depth_stencil_surface, SceGxmDepthStencilSurface *store_depth_stencil_surface) {
+    renderer::add_command(ctx, renderer::CommandOpcode::SetContext, nullptr, target, color_surface, depth_stencil_surface, store_depth_stencil_surface);
 }
 
 namespace {
@@ -419,6 +419,10 @@ void stream_snapshot_disable_for_program(const uint32_t program_addr, const uint
         std::vector<uint8_t>().swap(g_snap_ring);
     }
     LOG_INFO("[SNAPSHOT] disabled for this game: the program at 0x{:08X} (flags 0x{:X}) writes memory from the GPU, so a copy of a vertex stream taken on the guest thread could miss what the GPU writes into it later", program_addr, program_flags);
+}
+
+bool stream_snapshot_disabled() {
+    return g_snap_disabled.load(std::memory_order_relaxed);
 }
 
 void set_vertex_stream(State &state, Context *ctx, const std::size_t index, const std::size_t data_len, const Ptr<const void> stream) {

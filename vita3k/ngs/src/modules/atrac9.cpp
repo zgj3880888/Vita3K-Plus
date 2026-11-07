@@ -35,11 +35,13 @@ static int32_t valid_buffer_index(const int32_t index) {
     return (index >= 0 && index < SCE_NGS_AT9_MAX_BUFFER_PARAMS) ? index : -1;
 }
 
-static int32_t first_buffer_with_data(const SceNgsAT9Params *params, int32_t index) {
+static int32_t first_buffer_with_data(const SceNgsAT9Params *params, int32_t index, const bool null_ends) {
     for (int32_t visited = 0; visited <= SCE_NGS_AT9_MAX_BUFFER_PARAMS && index != -1; visited++) {
         const SceNgsAT9BufferParams &buffer = params->buffer_params[index];
         if (buffer.buffer && buffer.bytes_count > 0)
             return index;
+        if (null_ends && !buffer.buffer)
+            return -1;
         index = valid_buffer_index(buffer.next_buffer_index);
     }
     return -1;
@@ -373,8 +375,6 @@ bool Atrac9Module::decode_more_data(KernelState &kern, const MemState &mem, cons
 
     logical->superframe_staging.clear();
 
-    state->samples_generated_since_key_on += decoded_size * SCE_NGS_MAX_SYSTEM_CHANNELS;
-    state->samples_generated_total += decoded_size * SCE_NGS_MAX_SYSTEM_CHANNELS;
     state->bytes_consumed_since_key_on += superframe_size;
     state->total_bytes_consumed += superframe_size;
     runtime->decoder->export_state(&logical->saved_state);
@@ -421,7 +421,7 @@ bool Atrac9Module::process(KernelState &kern, const MemState &mem, const SceUID 
     bool is_finished = false;
     // call decode more data until we either have an error or reached end of data
     while (logical->decoded_pcm.available_frames() < wanted) {
-        const int32_t playable = first_buffer_with_data(params, state->current_buffer);
+        const int32_t playable = first_buffer_with_data(params, state->current_buffer, null_buffer_ends_stream && logical->reached_data);
         if (playable == -1) {
             if (!logical->reached_data)
                 break;
@@ -461,6 +461,8 @@ bool Atrac9Module::process(KernelState &kern, const MemState &mem, const SceUID 
 
     logical->decoded_pcm.consume_frames(samples_to_be_passed);
     logical->samples_played += samples_to_be_passed;
+    state->samples_generated_since_key_on += samples_to_be_passed * SCE_NGS_MAX_SYSTEM_CHANNELS;
+    state->samples_generated_total += samples_to_be_passed * SCE_NGS_MAX_SYSTEM_CHANNELS;
 
     if (!is_finished && limit > 0 && logical->samples_played >= static_cast<uint64_t>(limit)) {
         voice_lock.unlock();

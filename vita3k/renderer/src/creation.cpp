@@ -361,8 +361,8 @@ bool create(std::unique_ptr<FragmentProgram> &fp, State &state, const SceGxmProg
 
     fp->output_register_format = output_format;
     fp->multisample_mode = multisample_mode;
-    fp->color_write_mask = 0xF;
-    if (blend) {
+    fp->color_write_mask = program.has_no_color_output() ? 0 : 0xF;
+    if (blend && fp->color_write_mask && !program.is_native_color()) {
         fp->color_write_mask = ((blend->colorMask & SCE_GXM_COLOR_MASK_R) ? 1 : 0) | ((blend->colorMask & SCE_GXM_COLOR_MASK_G) ? 2 : 0)
             | ((blend->colorMask & SCE_GXM_COLOR_MASK_B) ? 4 : 0) | ((blend->colorMask & SCE_GXM_COLOR_MASK_A) ? 8 : 0);
     }
@@ -374,6 +374,7 @@ bool create(std::unique_ptr<FragmentProgram> &fp, State &state, const SceGxmProg
     fp->buffer_count = shader::usse::get_uniform_buffer_sizes(program, fp->uniform_buffer_sizes);
     layout_ssbo_offset_from_uniform_buffer_sizes(fp->uniform_buffer_sizes, fp->uniform_buffer_data_offsets, fp->max_total_uniform_buffer_storage);
     fp->dynamic_uniform_buffers = shader::usse::get_dynamic_uniform_buffers(program);
+    fp->written_uniform_buffers = shader::usse::get_written_uniform_buffers(program);
     fp->textures_used = gxp::get_textures_used(program);
     fp->texture_count = std::bit_width(fp->textures_used.to_ulong());
 
@@ -408,6 +409,7 @@ bool create(std::unique_ptr<VertexProgram> &vp, State &state, const SceGxmProgra
     shader::usse::get_attribute_informations(program, vp->attribute_infos);
     layout_ssbo_offset_from_uniform_buffer_sizes(vp->uniform_buffer_sizes, vp->uniform_buffer_data_offsets, vp->max_total_uniform_buffer_storage);
     vp->dynamic_uniform_buffers = shader::usse::get_dynamic_uniform_buffers(program);
+    vp->written_uniform_buffers = shader::usse::get_written_uniform_buffers(program);
     vp->textures_used = gxp::get_textures_used(program);
     vp->texture_count = std::bit_width(vp->textures_used.to_ulong());
 
@@ -455,8 +457,21 @@ bool init(FrameHost &frame, std::unique_ptr<State> &state, Backend backend, cons
         state = std::make_unique<vulkan::VKState>(config.current_config.gpu_idx);
         state->frame = &frame;
         state->init_paths(root_paths);
-        if (!vulkan::create(state, config))
+        if (!vulkan::create(state, config)) {
+#ifdef __ANDROID__
+            if (!static_cast<vulkan::VKState &>(*state).custom_driver_cannot_present)
+                return false;
+            LOG_WARN("Custom driver {} could not create the swapchain on this device. This session runs on the system driver (the driver setting is unchanged)", config.current_config.custom_driver_name);
+            state = std::make_unique<vulkan::VKState>(config.current_config.gpu_idx);
+            static_cast<vulkan::VKState &>(*state).ignore_custom_driver = true;
+            state->frame = &frame;
+            state->init_paths(root_paths);
+            if (!vulkan::create(state, config))
+                return false;
+#else
             return false;
+#endif
+        }
         break;
 
     default:

@@ -413,13 +413,14 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         }
     }
 #ifdef __ANDROID__
-    const bool custom_driver_requested = !config.current_config.custom_driver_name.empty();
+    const std::string custom_driver_name = ignore_custom_driver ? std::string() : config.current_config.custom_driver_name;
+    const bool custom_driver_requested = !custom_driver_name.empty();
 #endif
 
     // Create Instance
     {
 #if defined(__ANDROID__) && defined(USE_ADRENO_TOOLS)
-        PFN_vkGetInstanceProcAddr vk_get_instance_proc_addr = android_driver::resolve_vk_get_instance_proc_addr(config.current_config.custom_driver_name);
+        PFN_vkGetInstanceProcAddr vk_get_instance_proc_addr = android_driver::resolve_vk_get_instance_proc_addr(custom_driver_name);
         if (!vk_get_instance_proc_addr)
             return false;
 
@@ -654,9 +655,9 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
                     physical_device_properties.vendorID,
                     physical_device_properties.driverVersion,
                     physical_device_properties.deviceName.data()))
-                LOG_INFO("Custom Adreno driver {} injected successfully", config.current_config.custom_driver_name);
+                LOG_INFO("Custom driver {} injected successfully", config.current_config.custom_driver_name);
             else
-                LOG_WARN("Custom Adreno driver {} fell back to the system Vulkan loader", config.current_config.custom_driver_name);
+                LOG_WARN("Custom driver {} fell back to the system Vulkan loader", config.current_config.custom_driver_name);
         }
 #endif
 
@@ -709,6 +710,7 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
             .wideLines = physical_device_features.wideLines,
             .samplerAnisotropy = physical_device_features.samplerAnisotropy,
             .occlusionQueryPrecise = physical_device_features.occlusionQueryPrecise,
+            .vertexPipelineStoresAndAtomics = physical_device_features.vertexPipelineStoresAndAtomics,
             .fragmentStoresAndAtomics = physical_device_features.fragmentStoresAndAtomics,
             .shaderStorageImageExtendedFormats = physical_device_features.shaderStorageImageExtendedFormats,
             .shaderClipDistance = physical_device_features.shaderClipDistance,
@@ -917,6 +919,9 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         // a vertex program's own clip planes are unrelated to the depth clamp so they only need the device feature
         features.support_gxm_clip_planes = static_cast<bool>(physical_device_features.shaderClipDistance);
 
+        if (!physical_device_features.vertexPipelineStoresAndAtomics && physical_device_features.fragmentStoresAndAtomics)
+            features.vertex_store_slots = static_cast<int>(std::min(physical_device_properties.limits.maxVertexOutputComponents, physical_device_properties.limits.maxFragmentInputComponents) / 4) - 2;
+
         vk::StructureChain<vk::DeviceCreateInfo,
             vk::PhysicalDeviceBufferDeviceAddressFeatures,
             vk::PhysicalDeviceUniformBufferStandardLayoutFeatures,
@@ -1023,6 +1028,9 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         if (supported_mapping_methods_mask > 1)
             allocator_info.flags |= vma::AllocatorCreateFlagBits::eBufferDeviceAddress;
 
+        if (mem_diag::low_memory_device())
+            allocator_info.preferredLargeHeapBlockSize = MiB(64);
+
         allocator = vma::createAllocator(allocator_info);
         vkutil::init(allocator);
     }
@@ -1080,8 +1088,15 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         frame.destroy_queue.init(device);
     }
 
-    if (!screen_renderer.setup())
+    if (!screen_renderer.setup()) {
+#ifdef __ANDROID__
+        if (custom_driver_requested) {
+            cleanup_failed_create();
+            custom_driver_cannot_present = true;
+        }
+#endif
         return false;
+    }
 
     init_overlay_font_dirs();
 
@@ -1114,6 +1129,8 @@ void VKState::late_init(const Config &cfg, const std::string_view game_id, MemSt
         features.direct_fragcolor = true;
         features.support_shader_interlock = false;
     }
+
+    features.support_depth_mirror = features.should_use_shader_interlock() && deep_stencil_use == vk::Format::eD32SfloatS8Uint;
 
     // Diagnostic/workaround: without VK_EXT/ARM_rasterization_order_attachment_access, overlapping
     // primitives inside ONE draw have no defined order when the shader reads the colour attachment
@@ -1252,10 +1269,10 @@ void VKState::log_gpu_configuration(const Config &cfg) {
         features.support_scaled_attribute_formats);
     LOG_INFO("  FeatureState: enable_memory_mapping={} use_texture_viewport={} spirv_shader={} emulate_f16_denormals={} features_mask=0x{:X}",
         features.enable_memory_mapping, features.use_texture_viewport, features.spirv_shader, features.emulate_f16_denormals, get_features_mask());
-    LOG_INFO("  derived: should_use_shader_interlock={} should_use_texture_barrier={} programmable_blending={}",
+    LOG_INFO("  derived: should_use_shader_interlock={} should_use_texture_barrier={} programmable_blending={} support_depth_mirror={}",
         features.should_use_shader_interlock(), features.should_use_texture_barrier(),
-        features.is_programmable_blending_supported());
-    LOG_INFO("  build switches: enable_depth_clamp={} support_clip_distance={} gxm_clip_planes={}", enable_depth_clamp, features.support_clip_distance, features.support_gxm_clip_planes);
+        features.is_programmable_blending_supported(), features.support_depth_mirror);
+    LOG_INFO("  build switches: enable_depth_clamp={} support_clip_distance={} gxm_clip_planes={} vertex_store_slots={}", enable_depth_clamp, features.support_clip_distance, features.support_gxm_clip_planes, features.vertex_store_slots);
 
     const char *mapping_names[] = { "Disabled", "DoubleBuffer", "ExternalHost", "PageTable", "NativeBuffer" };
     const int mapping_idx = static_cast<int>(mapping_method);
@@ -1536,8 +1553,14 @@ void VKState::swap_window() {
     // Android asked us to give memory back!
     const int trim_level = memory_trim_level.exchange(-1, std::memory_order_relaxed);
     if (trim_level >= 0) {
-        device.waitIdle();
-        const uint64_t freed = texture_cache.release_all_cached_textures();
+        constexpr int trim_ui_hidden = 20;
+        uint64_t freed = 0;
+        if (trim_level >= trim_ui_hidden) {
+            device.waitIdle();
+            freed = texture_cache.release_all_cached_textures();
+        } else {
+            freed = texture_cache.release_idle_textures();
+        }
         LOG_WARN("[ANDROID MEMORY] trim level {}: released {} MiB of cached textures", trim_level, freed / (1024 * 1024));
         dormant_trim_requested = true;
         mem_diag::log_memory_snapshot("post-trim");
@@ -2423,6 +2446,47 @@ void VKState::wait_gpu_idle() {
 }
 
 #ifdef __ANDROID__
+void VKState::cleanup_failed_create() {
+    screen_renderer.cleanup();
+
+    default_image.destroy();
+    default_raw_image.destroy();
+    default_buffer.destroy();
+
+    for (int i = 0; i < MAX_FRAMES_RENDERING; i++) {
+        device.destroy(frames[i].render_pool);
+        frames[i].render_pool = nullptr;
+        device.destroy(frames[i].prerender_pool);
+        frames[i].prerender_pool = nullptr;
+    }
+
+    device.destroy(general_command_pool);
+    general_command_pool = nullptr;
+    device.destroy(transfer_command_pool);
+    transfer_command_pool = nullptr;
+    device.destroy(multithread_command_pool);
+    multithread_command_pool = nullptr;
+
+    allocator.destroy();
+
+    vkutil::deinit();
+
+    device.destroy();
+    device = nullptr;
+
+    if (debug_messenger) {
+        instance.destroyDebugUtilsMessengerEXT(debug_messenger);
+        debug_messenger = nullptr;
+    }
+    if (debug_report) {
+        instance.destroyDebugReportCallbackEXT(debug_report);
+        debug_report = nullptr;
+    }
+
+    instance.destroy();
+    instance = nullptr;
+}
+
 bool VKState::support_custom_drivers() {
     // vendor ID 0x5143 is Qualcomm, being stock or turnip
     return physical_device_properties.vendorID == 0x5143;

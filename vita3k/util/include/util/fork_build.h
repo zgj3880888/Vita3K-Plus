@@ -29,5 +29,5 @@
 
 #pragma once
 
-#define FORK_BUILD_SEQ 693
-#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + fix1: reap display/pipeline threads on GXM re-init + fix2: emulate USSE g23/g24/g43 pixel/tile registers, gate buffer stores to the guest pixel centre"
+#define FORK_BUILD_SEQ 694
+#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + upstream v1.4 merge (Killzone smoke/macrotile order, texture cache + low-memory, depth-buffer rework, vertex stores, cheat db, gamepad/camera fixes) + fix1: reap display/pipeline threads on GXM re-init"

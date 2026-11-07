@@ -140,6 +140,8 @@ struct GxmRecordState {
 
     SceGxmColorSurface color_surface;
     SceGxmDepthStencilSurface depth_stencil_surface;
+    SceGxmDepthStencilSurface depth_stencil_store_surface;
+    bool has_depth_stencil_store_surface = false;
 
     bool viewport_flat = false;
     std::array<float, 4> viewport_flip = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -191,6 +193,7 @@ struct ShaderProgram {
     UniformBufferSizes uniform_buffer_data_offsets; // Offset of the buffer in 4-bytes unit
     size_t max_total_uniform_buffer_storage;
     uint32_t dynamic_uniform_buffers = 0; // blocks can read through a computed address past their declared size
+    uint32_t written_uniform_buffers = 0; // blocks the program stores to
     uint16_t buffer_count; // max buffer index used by the shader + 1
 
     uint16_t texture_count; // max texture index used by the shader + 1

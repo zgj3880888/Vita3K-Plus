@@ -70,6 +70,16 @@ void sync_clipping(VKContext &context) {
         context.scissor.offset.y = 0;
     }
 
+    if (context.macrotile_replay.active) {
+        const int32_t tile_x0 = static_cast<int32_t>(context.macrotile_replay.pass_x) * context.render_target->macroblock_width;
+        const int32_t tile_y0 = static_cast<int32_t>(context.macrotile_replay.pass_y) * context.render_target->macroblock_height;
+        const int32_t x0 = std::max(context.scissor.offset.x, tile_x0);
+        const int32_t y0 = std::max(context.scissor.offset.y, tile_y0);
+        const int32_t x1 = std::min(context.scissor.offset.x + static_cast<int32_t>(context.scissor.extent.width), tile_x0 + static_cast<int32_t>(context.render_target->macroblock_width));
+        const int32_t y1 = std::min(context.scissor.offset.y + static_cast<int32_t>(context.scissor.extent.height), tile_y0 + static_cast<int32_t>(context.render_target->macroblock_height));
+        context.scissor = vk::Rect2D{ { x0, y0 }, { static_cast<uint32_t>(std::max(x1 - x0, 0)), static_cast<uint32_t>(std::max(y1 - y0, 0)) } };
+    }
+
     if (!context.is_recording)
         return;
 
@@ -90,11 +100,13 @@ void sync_stencil_func(VKContext &context, const bool is_back) {
         face = vk::StencilFaceFlagBits::eFrontAndBack;
         state = &context.record.front_stencil_state_values;
     } else {
-        face = is_back ? vk::StencilFaceFlagBits::eBack : vk::StencilFaceFlagBits::eFront;
+        // GXM gives its front two-sided state to clockwise triangles
+        face = is_back ? vk::StencilFaceFlagBits::eFront : vk::StencilFaceFlagBits::eBack;
         state = is_back ? &context.record.back_stencil_state_values : &context.record.front_stencil_state_values;
     }
 
-    context.render_cmd.setStencilCompareMask(face, (context.stencil_compare_mask_zeroed && !is_back) ? 0 : state->compare_mask);
+    const bool vulkan_front = face != vk::StencilFaceFlags(vk::StencilFaceFlagBits::eBack);
+    context.render_cmd.setStencilCompareMask(face, (context.stencil_compare_mask_zeroed && vulkan_front) ? 0 : state->compare_mask);
     context.render_cmd.setStencilReference(face, state->ref);
     context.render_cmd.setStencilWriteMask(face, state->write_mask);
 }

@@ -33,7 +33,9 @@
 #endif
 #include <display/functions.h>
 
+#include <cheat/functions.h>
 #include <config/state.h>
+#include <ctrl/functions.h>
 #include <dialog/state.h>
 #include <display/state.h>
 #include <emuenv/state.h>
@@ -53,8 +55,7 @@
 
 // Code heavily influenced by PPSSSPP's SceDisplay.cpp
 
-static constexpr int TARGET_FPS = 60;
-static constexpr int64_t TARGET_MICRO_PER_FRAME = 1000000LL / TARGET_FPS;
+static constexpr int64_t VBLANK_PERIOD_NS = 16'683'333;
 // how many cycles do we need to see before we start predicting the next frame
 static constexpr int predict_threshold = 3;
 static constexpr int max_expected_swapchain_size = 6;
@@ -123,18 +124,44 @@ static void freeze_watchdog_thread(EmuEnvState &emuenv) {
     }
 }
 
+static void wake_half_vblank_waiters(DisplayState &display) {
+    std::vector<ThreadStatePtr> ready;
+    {
+        const std::lock_guard<std::mutex> guard(display.mutex);
+        for (std::size_t i = 0; i < display.vblank_wait_infos.size();) {
+            if (display.vblank_wait_infos[i].wake_at_half_vblank) {
+                ready.push_back(display.vblank_wait_infos[i].target_thread);
+                display.vblank_wait_infos.erase(display.vblank_wait_infos.begin() + i);
+            } else {
+                i++;
+            }
+        }
+    }
+    for (const ThreadStatePtr &target_wait : ready) {
+        const std::lock_guard<std::mutex> target_lock(target_wait->mutex);
+        target_wait->update_status(ThreadStatus::run);
+    }
+}
+
 static void vblank_sync_thread(EmuEnvState &emuenv) {
     DisplayState &display = emuenv.display;
     std::thread watchdog(freeze_watchdog_thread, std::ref(emuenv));
 
+    const cheat::JitInvalidate invalidate_jit = [&emuenv](uint32_t address, size_t size) {
+        emuenv.kernel.invalidate_jit_cache(address, size);
+    };
+
     while (!display.abort.load()) {
         std::vector<ThreadStatePtr> vblank_ready;
+        bool has_frame = false;
         {
             const std::lock_guard<std::mutex> guard(display.mutex);
 
             {
                 const std::lock_guard<std::mutex> guard_info(display.display_info_mutex);
                 ++display.vblank_count;
+
+                has_frame = static_cast<bool>(display.sce_frame.base);
 
                 // in this case, even though no new game frames are being rendered, we still need to update the screen
                 if (emuenv.kernel.is_threads_paused() || (emuenv.common_dialog.status == SCE_COMMON_DIALOG_STATUS_RUNNING))
@@ -170,6 +197,15 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
             const std::lock_guard<std::mutex> target_lock(target_wait->mutex);
             target_wait->update_status(ThreadStatus::run);
         }
+
+        if (has_frame)
+            emuenv.cheat.count_frame();
+
+        // Cheat codes are re-applied on every vblank, the same way the Vita cheat plugins do (outside display.mutex since one can run 65536 writes).
+        // The pad is read here rather than taken from the game, which may stop reading it while a button is held.
+        if (cheat::enabled_cheat_count(emuenv.cheat) != 0)
+            cheat::set_buttons(emuenv.cheat, ctrl_peek_buttons(emuenv, 1));
+        cheat::apply(emuenv.cheat, emuenv.mem, invalidate_jit);
         // Periodic thread dump for diagnosing partial hangs
         if (emuenv.cfg.hang_dump_seconds > 0) {
             static uint64_t next_forced_dump_vblank = 0;
@@ -481,9 +517,19 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
             }
         }
 
-        const auto time_ms = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        const auto time_left = TARGET_MICRO_PER_FRAME - (time_ms % TARGET_MICRO_PER_FRAME);
-        std::this_thread::sleep_for(std::chrono::microseconds(time_left));
+        const auto time_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+        const auto time_left = VBLANK_PERIOD_NS - (time_ns % VBLANK_PERIOD_NS);
+        if (display.fps_hack) {
+            if (time_left > VBLANK_PERIOD_NS / 2) {
+                std::this_thread::sleep_for(std::chrono::nanoseconds(time_left - VBLANK_PERIOD_NS / 2));
+                wake_half_vblank_waiters(display);
+            }
+            const auto now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+            if (time_ns + time_left > now_ns)
+                std::this_thread::sleep_for(std::chrono::nanoseconds(time_ns + time_left - now_ns));
+        } else {
+            std::this_thread::sleep_for(std::chrono::nanoseconds(time_left));
+        }
     }
 
     watchdog.join();
@@ -493,7 +539,7 @@ void start_sync_thread(EmuEnvState &emuenv) {
     emuenv.display.vblank_thread = std::make_unique<std::thread>(vblank_sync_thread, std::ref(emuenv));
 }
 
-void wait_vblank(DisplayState &display, KernelState &kernel, const ThreadStatePtr &wait_thread, const uint64_t target_vcount, const bool is_cb) {
+void wait_vblank(DisplayState &display, KernelState &kernel, const ThreadStatePtr &wait_thread, const uint64_t target_vcount, const bool is_cb, const bool wake_at_half_vblank) {
     if (!wait_thread) {
         return;
     }
@@ -508,7 +554,7 @@ void wait_vblank(DisplayState &display, KernelState &kernel, const ThreadStatePt
                 return;
 
             wait_thread->update_status(ThreadStatus::wait);
-            display.vblank_wait_infos.push_back({ wait_thread, target_vcount });
+            display.vblank_wait_infos.push_back({ wait_thread, target_vcount, wake_at_half_vblank });
         }
 
         wait_thread->status_cond.wait(thread_lock, [&]() {
