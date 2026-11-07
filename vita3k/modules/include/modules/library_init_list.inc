@@ -17,6 +17,9 @@
 
 LIBRARY(SceAudiodec)
 LIBRARY(SceFiber)
+// Must stay: every SceLibLocation export locks LocationState::mutex, so the state that
+// LIBRARY_INIT creates has to exist before the guest can reach any of them.
+LIBRARY(SceLibLocation)
 LIBRARY(taihen)
 LIBRARY(SceSharedFb)
 LIBRARY(SceSysmem)

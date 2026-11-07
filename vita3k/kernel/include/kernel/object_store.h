@@ -62,6 +62,13 @@ public:
         std::lock_guard<std::mutex> lock(mutex);
         auto it = objs.find(TypeInfo::registered<T>::index);
         assert(it != objs.end());
+        // Release builds compile the assert out, and dereferencing end() yields whatever sits
+        // after the map header instead of a clean null. Returning null makes a missing
+        // create<T>() (usually a LIBRARY_INIT that is not listed in library_init_list.inc)
+        // show up as a plain null-check failure at the call site rather than a SIGSEGV
+        // inside libc, where nothing points back at the module that forgot to init.
+        if (it == objs.end())
+            return nullptr;
         return reinterpret_cast<T *>(it->second.get());
     }
 
