@@ -29,5 +29,5 @@
 
 #pragma once
 
-#define FORK_BUILD_SEQ 694
-#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + upstream v1.4 merge (Killzone smoke/macrotile order, texture cache + low-memory, depth-buffer rework, vertex stores, cheat db, gamepad/camera fixes) + fix1: reap display/pipeline threads on GXM re-init"
+#define FORK_BUILD_SEQ 695
+#define FORK_BUILD_CHANGES "UC coexisting (ATS off, high-accuracy off) + upstream v1.4 merge (Killzone smoke/macrotile order, texture cache + low-memory, depth-buffer rework, vertex stores, cheat db, gamepad/camera fixes) + fix1: reap display/pipeline threads on GXM re-init + cheats: Android settings page for the cheat db (list files, toggle each code, write back the _V marker)"

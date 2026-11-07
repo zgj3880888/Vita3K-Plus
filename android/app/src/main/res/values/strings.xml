@@ -349,6 +349,34 @@
     <string name="settings_tab_network">Network</string>
     <string name="settings_tab_debug">Debug</string>
     <string name="settings_tab_emulator">Emulator</string>
+    <string name="settings_tab_cheats">Cheats</string>
+
+    <!-- Settings - Cheats tab -->
+    <string name="settings_cheats_title">Cheat codes</string>
+    <string name="settings_cheats_summary">%1$d games · %2$d cheats on</string>
+    <string name="settings_cheats_summary_none">No cheat file found</string>
+    <string name="settings_cheats_help_body">Lists every cheat file in the cheats folder. Turning a cheat on writes _V1 into its declaration line of the .psv/.txt file, turning it off writes _V0; the file itself is never rewritten, only that one digit. If the game is the one currently running, the change is applied right away, otherwise it takes effect the next time the game boots. Codes are matched to a game by file name, so the file has to be called after the title ID, for example PCSF00021.psv.</string>
+    <string name="settings_cheats_folder">Folder: %1$s</string>
+    <string name="settings_cheats_folder_unknown">The cheats folder is not available yet. Start the emulator once, then come back.</string>
+    <string name="settings_cheats_browse">Browse cheat folder</string>
+    <string name="settings_cheats_browse_value">Open the cheats folder in the system file browser to drop .psv files in</string>
+    <string name="settings_cheats_browse_unavailable">No document browser found on this device. Vita3K+ still appears as a storage location in the sidebar of the system file picker, and in file managers that support document providers.</string>
+    <string name="settings_cheats_refresh">Refresh</string>
+    <string name="settings_cheats_empty">The cheats folder holds no cheat file.</string>
+    <string name="settings_cheats_empty_hint">Copy a FinalCheat or VitaCheat .psv file into that folder and name it after the title ID of the game, then press Refresh. _V1 name turns a cheat on when the game boots, _V0 name leaves it off.</string>
+    <string name="settings_cheats_running">This game</string>
+    <string name="settings_cheats_counts">%1$d/%2$d on</string>
+    <string name="settings_cheats_broken_count">%1$d broken</string>
+    <string name="settings_cheats_broken">Broken code</string>
+    <string name="settings_cheats_broken_desc">The parser rejected a line of this cheat, so it can never be turned on. The rest of the file is unaffected; only this block is skipped.</string>
+    <string name="settings_cheats_broken_total">%1$d cheat(s) in this folder contain malformed code and are disabled.</string>
+    <string name="settings_cheats_enable_all">Enable all</string>
+    <string name="settings_cheats_disable_all">Disable all</string>
+    <string name="settings_cheats_no_entries">This file declares no cheat.</string>
+    <string name="settings_cheats_no_code">No code line</string>
+    <string name="settings_cheats_entry_desc">%1$d code line(s). Shown under the name is the first one, which usually holds the address the cheat writes to.</string>
+    <string name="settings_cheats_takes_effect">Changes apply immediately while the game is running, otherwise at the next boot. The game may overwrite a value after the first second, which is why codes are re-applied every frame.</string>
+    <string name="settings_cheats_write_failed">Could not write the cheat file. It may be read-only or have been changed on disk since the list was loaded.</string>
 
     <!-- Settings — Core tab -->
     <string name="settings_modules_mode">Module Loading Mode</string>

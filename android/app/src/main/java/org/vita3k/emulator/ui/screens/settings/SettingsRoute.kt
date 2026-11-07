@@ -673,7 +673,8 @@ private fun SettingsContentPane(
                 onResetControlsLayout = onResetControlsLayout,
                 controllerConnected = controllerConnected,
                 connectedGamepads = connectedGamepads,
-                onShowHelp = onShowHelp
+                onShowHelp = onShowHelp,
+                titleId = titleId
             )
         } else {
             SettingsSearchResults(

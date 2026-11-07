@@ -4,6 +4,7 @@ import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Memory
@@ -39,6 +40,7 @@ internal enum class SettingsCategory(
     Interface(R.string.settings_tab_interface, Icons.Default.Settings),
     Emulator(R.string.settings_tab_emulator, Icons.Default.SettingsSuggest),
     Network(R.string.settings_tab_network, Icons.Default.Public),
+    Cheats(R.string.settings_tab_cheats, Icons.Default.Code),
     Debug(R.string.settings_tab_debug, Icons.Default.BugReport)
 }
 

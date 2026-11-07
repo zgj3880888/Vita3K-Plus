@@ -988,7 +988,8 @@ private fun EmbeddedSettingsTab(
             onStartControlsEditor = { sessionViewModel.startControlsEditor(activity) },
             onResetControlsLayout = { sessionViewModel.resetControlsLayout(activity) },
             controllerConnected = sessionViewModel.uiState.controllerConnected,
-            onShowHelp = onShowHelp
+            onShowHelp = onShowHelp,
+            titleId = titleId
         )
 
         SettingsNote(text = stringResource(R.string.emulation_runtime_note))

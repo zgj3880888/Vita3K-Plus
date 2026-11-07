@@ -3,6 +3,8 @@ package org.vita3k.emulator
 import org.vita3k.emulator.data.EmulatorConfig
 import org.vita3k.emulator.data.InstallCallback
 import org.vita3k.emulator.data.NativeAppInfo
+import org.vita3k.emulator.data.NativeCheatEntry
+import org.vita3k.emulator.data.NativeCheatFile
 import org.vita3k.emulator.data.NativeTrophyCollection
 import org.vita3k.emulator.data.NativeUser
 
@@ -132,6 +134,18 @@ object NativeLib {
     external fun activateUser(userId: String): Boolean
     /** Deletes the selected user and updates the active user when needed. */
     external fun deleteUser(userId: String): Boolean
+
+    // --- Cheats ---
+    /** Returns one entry per game that has a cheat file in the cheats folder. */
+    external fun getCheatFiles(): Array<NativeCheatFile>
+    /** Returns the cheats of one game, in file order. */
+    external fun getCheats(titleId: String): Array<NativeCheatEntry>
+    /** Turns one cheat on or off by rewriting its `_V0`/`_V1` marker; also applies it live when that game is running. */
+    external fun setCheatEnabled(titleId: String, index: Int, enabled: Boolean): Boolean
+    /** Turns every cheat of a game on or off; broken cheats always stay off. */
+    external fun setAllCheatsEnabled(titleId: String, enabled: Boolean): Boolean
+    /** Returns the folder cheat files are read from. */
+    external fun getCheatDirectory(): String
 
     // --- Running app session ---
     /** Blocks or releases gameplay input without changing the native pause state. */

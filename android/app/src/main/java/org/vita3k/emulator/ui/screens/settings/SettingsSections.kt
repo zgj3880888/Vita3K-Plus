@@ -235,7 +235,8 @@ internal fun SettingsCategoryBody(
     onResetControlsLayout: (() -> Unit)? = null,
     controllerConnected: Boolean = false,
     connectedGamepads: List<ConnectedGamepad> = emptyList(),
-    onShowHelp: (SettingsHelpEntry) -> Unit
+    onShowHelp: (SettingsHelpEntry) -> Unit,
+    titleId: String? = null
 ) {
     when (category) {
         SettingsCategory.Core -> CoreSettingsSection(
@@ -300,6 +301,10 @@ internal fun SettingsCategoryBody(
             isPerApp = isPerApp,
             availableAdhocAddresses = availableAdhocAddresses,
             onUpdate = onUpdate,
+            onShowHelp = onShowHelp
+        )
+        SettingsCategory.Cheats -> CheatsSettingsSection(
+            titleId = titleId,
             onShowHelp = onShowHelp
         )
         SettingsCategory.Debug -> DebugSettingsSection(
