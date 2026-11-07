@@ -163,9 +163,9 @@
     <string name="about_revision">修订：%1$s</string>
     <string name="about_legal_notice">Vita3K 不鼓励盗版，请使用自行转储的游戏。</string>
     <string name="about_localizer">震东君 修复汉化</string>
-    <string name="about_description_html"><![CDATA[Vita3K 是世界上首个可运行的 PS Vita 与 PS TV 模拟器，开源，使用 C++ 编写，支持 Windows、Linux、macOS 与 Android。访问 <a href="https://vita3k.org/quickstart.html">vita3k.org</a> 了解更多信息，想参与贡献可在 <a href="https://github.com/Vita3K/Vita3K">GitHub</a> 上浏览项目，或通过 <a href="https://ko-fi.com/vita3k">Ko-fi</a> 支持我们。]]></string>
-    <string name="about_credit_html"><![CDATA[图标：<a href="https://gordonmackayillustration.blogspot.com">Gordon Mackay</a>。]]></string>
-    <string name="about_footer_html"><![CDATA[<a href="https://vita3k.org">官网</a> | <a href="https://github.com/Vita3K/Vita3K">GitHub</a> | <a href="https://ko-fi.com/vita3k">Ko-fi</a> | <a href="https://discord.com/invite/6aGwQzh">Discord</a>]]></string>
+    <string name="about_description_html">Vita3K 是世界上首个可运行的 PS Vita 与 PS TV 模拟器，开源，使用 C++ 编写，支持 Windows、Linux、macOS 与 Android。访问 &lt;a href=&quot;https://vita3k.org/quickstart.html&quot;&gt;vita3k.org&lt;/a&gt; 了解更多信息，想参与贡献可在 &lt;a href=&quot;https://github.com/Vita3K/Vita3K&quot;&gt;GitHub&lt;/a&gt; 上浏览项目，或通过 &lt;a href=&quot;https://ko-fi.com/vita3k&quot;&gt;Ko-fi&lt;/a&gt; 支持我们。</string>
+    <string name="about_credit_html">图标：&lt;a href=&quot;https://gordonmackayillustration.blogspot.com&quot;&gt;Gordon Mackay&lt;/a&gt;。</string>
+    <string name="about_footer_html">&lt;a href=&quot;https://vita3k.org&quot;&gt;官网&lt;/a&gt; | &lt;a href=&quot;https://github.com/Vita3K/Vita3K&quot;&gt;GitHub&lt;/a&gt; | &lt;a href=&quot;https://ko-fi.com/vita3k&quot;&gt;Ko-fi&lt;/a&gt; | &lt;a href=&quot;https://discord.com/invite/6aGwQzh&quot;&gt;Discord&lt;/a&gt;</string>
 
     <!-- Updates -->
     <string name="updates_check_title">检查更新</string>

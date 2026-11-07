@@ -162,9 +162,9 @@
     <string name="about_revision">Revision: %1$s</string>
     <string name="about_legal_notice">Vita3K does not condone piracy. You must dump your own games.</string>
     <string name="about_localizer">震东君 修复汉化</string>
-    <string name="about_description_html"><![CDATA[Vita3K is the world's first functional PS Vita and PS TV emulator, open source and written in C++ for Windows, Linux, macOS, and Android. Visit <a href="https://vita3k.org/quickstart.html">vita3k.org</a> for more info, browse the project on <a href="https://github.com/Vita3K/Vita3K">GitHub</a> if you want to contribute, or support us on <a href="https://ko-fi.com/vita3k">Ko-fi</a>.]]></string>
-    <string name="about_credit_html"><![CDATA[Icon by <a href="https://gordonmackayillustration.blogspot.com">Gordon Mackay</a>.]]></string>
-    <string name="about_footer_html"><![CDATA[<a href="https://vita3k.org">Website</a> | <a href="https://github.com/Vita3K/Vita3K">GitHub</a> | <a href="https://ko-fi.com/vita3k">Ko-fi</a> | <a href="https://discord.com/invite/6aGwQzh">Discord</a>]]></string>
+    <string name="about_description_html">Vita3K is the world\'s first functional PS Vita and PS TV emulator, open source and written in C++ for Windows, Linux, macOS, and Android. Visit &lt;a href=&quot;https://vita3k.org/quickstart.html&quot;&gt;vita3k.org&lt;/a&gt; for more info, browse the project on &lt;a href=&quot;https://github.com/Vita3K/Vita3K&quot;&gt;GitHub&lt;/a&gt; if you want to contribute, or support us on &lt;a href=&quot;https://ko-fi.com/vita3k&quot;&gt;Ko-fi&lt;/a&gt;.</string>
+    <string name="about_credit_html">Icon by &lt;a href=&quot;https://gordonmackayillustration.blogspot.com&quot;&gt;Gordon Mackay&lt;/a&gt;.</string>
+    <string name="about_footer_html">&lt;a href=&quot;https://vita3k.org&quot;&gt;Website&lt;/a&gt; | &lt;a href=&quot;https://github.com/Vita3K/Vita3K&quot;&gt;GitHub&lt;/a&gt; | &lt;a href=&quot;https://ko-fi.com/vita3k&quot;&gt;Ko-fi&lt;/a&gt; | &lt;a href=&quot;https://discord.com/invite/6aGwQzh&quot;&gt;Discord&lt;/a&gt;</string>
 
     <!-- Updates -->
     <string name="updates_check_title">Check for Updates</string>
