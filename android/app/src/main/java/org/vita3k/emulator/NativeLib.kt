@@ -148,6 +148,10 @@ object NativeLib {
     external fun getCheatDirectory(): String
     /** Summarises what the recursive walk of the cheats folder saw, for troubleshooting an empty list. */
     external fun getCheatScan(): String
+    /** Reports what the engine loaded for the running game: switches, frame gate and the addresses of enabled cheats. */
+    external fun getCheatStatus(): String
+    /** Reloads the cheat file, writes once and reads the addresses back, to prove whether the writes land. */
+    external fun runCheatSelfTest(titleId: String): String
 
     // --- Running app session ---
     /** Blocks or releases gameplay input without changing the native pause state. */

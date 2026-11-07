@@ -1,5 +1,7 @@
 package org.vita3k.emulator.ui.screens.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -28,6 +30,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -148,6 +151,8 @@ internal fun CheatsSettingsSection(
     var scan by remember { mutableStateOf("") }
     // Only filled when the emulator reports nothing, as the proof that the files are really there.
     var diskFiles by remember { mutableStateOf<List<String>>(emptyList()) }
+    var diagnosis by remember { mutableStateOf("") }
+    var diagnosing by remember { mutableStateOf(false) }
 
     // Reading the folder parses every cheat file, so it never runs on the composition thread.
     suspend fun refreshFiles() {
@@ -185,6 +190,26 @@ internal fun CheatsSettingsSection(
             runCatching { NativeLib.getCheats(id).toList() }.getOrDefault(emptyList())
         }
         entriesLoading = false
+    }
+
+    // Reads the live engine state, and optionally makes it write once and report what landed.
+    // Everything here fails silently inside the engine otherwise, so it has to be visible.
+    suspend fun diagnose(withSelfTest: Boolean) {
+        if (diagnosing)
+            return
+        diagnosing = true
+        val running = titleId
+        val report = withContext(Dispatchers.IO) {
+            runCatching {
+                buildString {
+                    if (withSelfTest && running != null)
+                        append(NativeLib.runCheatSelfTest(running)).append('\n')
+                    append(NativeLib.getCheatStatus())
+                }
+            }.getOrDefault("")
+        }
+        diagnosis = report
+        diagnosing = false
     }
 
     LaunchedEffect(Unit) { refreshFiles() }
@@ -307,6 +332,49 @@ internal fun CheatsSettingsSection(
             enabled = !busy && directory.isNotBlank(),
             onShowHelp = onShowHelp
         )
+
+        SettingsActionRow(
+            title = stringResource(R.string.settings_cheats_diagnose),
+            value = stringResource(R.string.settings_cheats_diagnose_value),
+            onClick = { scope.launch { diagnose(withSelfTest = false) } },
+            actionLabel = stringResource(R.string.settings_cheats_diagnose_run),
+            onActionClick = { scope.launch { diagnose(withSelfTest = false) } },
+            actionEnabled = !diagnosing,
+            onShowHelp = onShowHelp
+        )
+
+        SettingsActionRow(
+            title = stringResource(R.string.settings_cheats_selftest),
+            value = if (titleId == null) {
+                stringResource(R.string.settings_cheats_selftest_no_game)
+            } else {
+                stringResource(R.string.settings_cheats_selftest_value)
+            },
+            onClick = { if (titleId != null) scope.launch { diagnose(withSelfTest = true) } },
+            enabled = titleId != null && !diagnosing,
+            onShowHelp = onShowHelp
+        )
+
+        if (diagnosing)
+            SettingsLoadingState()
+
+        if (diagnosis.isNotBlank()) {
+            Text(
+                text = diagnosis,
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp)
+            )
+            TextButton(onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("cheat diagnosis", diagnosis))
+                Toast.makeText(context, context.getString(R.string.settings_cheats_copied), Toast.LENGTH_SHORT).show()
+            }) {
+                Text(text = stringResource(R.string.settings_cheats_copy))
+            }
+        }
 
         if (loading && files.isEmpty()) {
             SettingsLoadingState()

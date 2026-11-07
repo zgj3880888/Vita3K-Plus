@@ -383,6 +383,15 @@
     <string name="settings_cheats_import_value">Pick a .psv from anywhere on the device; it is copied into the cheats folder and renamed after the title id in its name</string>
     <string name="settings_cheats_imported">Imported as %1$s</string>
     <string name="settings_cheats_import_failed">That file was not imported. Its name has to contain the nine character title id of a game, for example PCSF00403.psv.</string>
+    <string name="settings_cheats_diagnose">Diagnose</string>
+    <string name="settings_cheats_diagnose_value">What the engine loaded for the running game, and whether the addresses of the enabled cheats are reachable</string>
+    <string name="settings_cheats_diagnose_run">Run</string>
+    <string name="settings_cheats_diagnose_working">Reading the live cheat state...</string>
+    <string name="settings_cheats_selftest">Self-test the running game</string>
+    <string name="settings_cheats_selftest_value">Reload the file, write once, then read the addresses back. Tells a wrong address apart from a wrong file.</string>
+    <string name="settings_cheats_selftest_no_game">Start the game first, then run this.</string>
+    <string name="settings_cheats_copy">Copy</string>
+    <string name="settings_cheats_copied">Diagnosis copied</string>
 
     <!-- Settings — Core tab -->
     <string name="settings_modules_mode">Module Loading Mode</string>
