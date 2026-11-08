@@ -18,9 +18,14 @@ int set_mapped_touch(TouchState &state, int slot, float x, float y, bool active)
 // Moves a mapping point without touching its pressed state, so a pad button can hold it later even
 // when the overlay ring is hidden.
 int set_mapped_touch_position(TouchState &state, int slot, float x, float y);
-// Presses/releases a mapping point from a pad button (L3 -> slot 0, R3 -> slot 1).
+// Presses/releases a mapping point from a pad button (L3 -> slot 0, R3 -> slot 1, L2/R2 -> the rear
+// points). The caller decides whether the mapping that drives the slot is on, because the same call
+// serves both switches.
 int set_mapped_touch_pad(TouchState &state, int slot, bool active);
+// Turns on the pad's hold of the front points (first switch) or of the rear points (second one).
+// Turning one off lifts whatever that switch was holding, so no finger is left on the panel.
 void set_pad_touch_mapping(TouchState &state, bool enabled);
+void set_pad_rear_touch_mapping(TouchState &state, bool enabled);
 void clear_mapped_touch(TouchState &state);
 int toggle_touchscreen(TouchState &state);
 int touch_get(const SceUID thread_id, EmuEnvState &emuenv, const SceUInt32 &port, SceTouchData *pData, SceUInt32 count, bool is_peek);

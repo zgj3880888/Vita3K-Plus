@@ -278,11 +278,19 @@ void touch_vsync_update(EmuEnvState &emuenv) {
             LOG_INFO_ONCE("[TOUCH] on-screen touch mapping is active");
             SceTouchData *buffers = touch.touch_buffers[(touch.touch_buffer_idx + 1) % MAX_TOUCH_BUFFER_SAVED];
             for (int port = 0; port < 2; port++) {
-                if (!touch.touchscreen_both && port != touch.touchscreen_port)
-                    continue;
                 SceTouchData &data = buffers[port];
-                for (const auto &point : touch.mapped_touch) {
+                for (int slot = 0; slot < MAX_MAPPED_TOUCH; slot++) {
+                    const MappedTouch &point = touch.mapped_touch[slot];
                     if (!point.held() || data.reportNum >= SCE_TOUCH_MAX_REPORT)
+                        continue;
+                    // A rear point only ever reports on the back panel: it is the pad's triggers that
+                    // hold it, and driving it from the front would put a finger on the screen where
+                    // the ring is not even drawn. Every other point follows the front/back switch,
+                    // so it keeps working on whichever panel the player picked.
+                    const bool wants_port = (slot >= MAPPED_TOUCH_REAR_FIRST)
+                        ? (port == SCE_TOUCH_PORT_BACK)
+                        : (touch.touchscreen_both || port == touch.touchscreen_port);
+                    if (!wants_port)
                         continue;
                     // the point is over the letterbox rather than the panel: nothing to report
                     const float x = (point.x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
@@ -351,8 +359,6 @@ int set_mapped_touch_position(TouchState &state, const int slot, const float x, 
 int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
     if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
         return -1;
-    if (!state.pad_touch_mapping && active)
-        return 0;
 
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
     MappedTouch &point = state.mapped_touch[slot];
@@ -363,9 +369,15 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
             LOG_WARN_ONCE("[TOUCH] pad touch mapping has no position yet; open the controls editor once to place the points");
             return -1;
         }
+        const bool was_held = point.pad_active;
         mapped_touch_down(state, point);
         point.pad_active = true;
-        LOG_INFO_ONCE("[TOUCH] pad L3/R3 press a mapping point of the touch panel");
+        if (!was_held) {
+            if (slot >= MAPPED_TOUCH_REAR_FIRST)
+                LOG_INFO_ONCE("[TOUCH] pad L2/R2 press a rear touch mapping point");
+            else
+                LOG_INFO_ONCE("[TOUCH] pad L3/R3 press a mapping point of the touch panel");
+        }
         return 0;
     }
 
@@ -377,8 +389,17 @@ void set_pad_touch_mapping(TouchState &state, const bool enabled) {
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
     state.pad_touch_mapping = enabled;
     if (!enabled) {
-        for (auto &point : state.mapped_touch)
-            point.pad_active = false;
+        for (int slot = 0; slot < MAPPED_TOUCH_REAR_FIRST; slot++)
+            state.mapped_touch[slot].pad_active = false;
+    }
+}
+
+void set_pad_rear_touch_mapping(TouchState &state, const bool enabled) {
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    state.pad_rear_touch_mapping = enabled;
+    if (!enabled) {
+        for (int slot = MAPPED_TOUCH_REAR_FIRST; slot < MAX_MAPPED_TOUCH; slot++)
+            state.mapped_touch[slot].pad_active = false;
     }
 }
 

@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SettingsSuggest
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.runtime.Composable
@@ -40,6 +41,9 @@ internal enum class SettingsCategory(
     Interface(R.string.settings_tab_interface, Icons.Default.Settings),
     Emulator(R.string.settings_tab_emulator, Icons.Default.SettingsSuggest),
     Network(R.string.settings_tab_network, Icons.Default.Public),
+    // sits next to Cheats on purpose: both are the "make this game playable for me" switches, and
+    // the rear panel is the one place a pad player cannot reach without help
+    RearTouch(R.string.settings_tab_rear_touch, Icons.Default.SportsEsports),
     Cheats(R.string.settings_tab_cheats, Icons.Default.Code),
     Debug(R.string.settings_tab_debug, Icons.Default.BugReport)
 }

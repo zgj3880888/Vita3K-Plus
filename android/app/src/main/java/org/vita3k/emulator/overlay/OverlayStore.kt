@@ -24,6 +24,7 @@ object OverlayStore {
     private const val KEY_HIDE_ON_CONTROLLER = "hide_overlay_on_controller"
     private const val KEY_TOUCH_SWITCH_TILT = "overlay_touch_switch_tilt"
     private const val KEY_PAD_TOUCH_MAP = "overlay_pad_touch_map"
+    private const val KEY_PAD_REAR_TOUCH_MAP = "overlay_pad_rear_touch_map"
     private const val KEY_CONFIG_PREFIX = "config"
     private const val KEY_LAYOUT_PREFIX = "layout"
     private const val KEY_POSITION_X_SUFFIX = ":x"
@@ -57,7 +58,9 @@ object OverlayStore {
         OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_1, R.integer.TOUCH_MAP_1_X, R.integer.TOUCH_MAP_1_Y),
         OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_2, R.integer.TOUCH_MAP_2_X, R.integer.TOUCH_MAP_2_Y),
         OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_3, R.integer.TOUCH_MAP_3_X, R.integer.TOUCH_MAP_3_Y),
-        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_4, R.integer.TOUCH_MAP_4_X, R.integer.TOUCH_MAP_4_Y)
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_4, R.integer.TOUCH_MAP_4_X, R.integer.TOUCH_MAP_4_Y),
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_5, R.integer.TOUCH_MAP_5_X, R.integer.TOUCH_MAP_5_Y),
+        OverlayPositionDefaults(InputOverlay.ButtonType.TOUCH_MAP_6, R.integer.TOUCH_MAP_6_X, R.integer.TOUCH_MAP_6_Y)
     )
 
     @JvmStatic
@@ -216,6 +219,7 @@ object OverlayStore {
             )
             putBoolean(configKey(normalizedScopeId, KEY_TOUCH_SWITCH_TILT), normalizedState.config.touchSwitchTilt)
             putBoolean(configKey(normalizedScopeId, KEY_PAD_TOUCH_MAP), normalizedState.config.padTouchMapping)
+            putBoolean(configKey(normalizedScopeId, KEY_PAD_REAR_TOUCH_MAP), normalizedState.config.padRearTouchMapping)
             saveLayoutEntries(this, normalizedScopeId, normalizedState.layout)
             if (markOverride && normalizedScopeId.isNotEmpty()) {
                 putBoolean(overrideEnabledKey(normalizedScopeId), true)
@@ -244,7 +248,8 @@ object OverlayStore {
             overlayOpacity = prefs.getInt(keys[2], fallback.overlayOpacity),
             hideOverlayWhenControllerConnected = prefs.getBoolean(keys[3], fallback.hideOverlayWhenControllerConnected),
             touchSwitchTilt = prefs.getBoolean(configKey(scopeId, KEY_TOUCH_SWITCH_TILT), fallback.touchSwitchTilt),
-            padTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_TOUCH_MAP), fallback.padTouchMapping)
+            padTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_TOUCH_MAP), fallback.padTouchMapping),
+            padRearTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_REAR_TOUCH_MAP), fallback.padRearTouchMapping)
         ).normalized()
     }
 

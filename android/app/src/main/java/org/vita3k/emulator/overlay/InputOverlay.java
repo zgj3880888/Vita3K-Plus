@@ -12,6 +12,7 @@ import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.DashPathEffect;
 import android.graphics.Paint;
 import android.graphics.Rect;
 import android.graphics.Typeface;
@@ -67,6 +68,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private int mOpacity = 100;
   private boolean mTouchSwitchTilt = false;
   private boolean mPadTouchMapping = true;
+  private boolean mPadRearTouchMapping = true;
   private OverlayLayout mLayout;
   // where each touch mapping point was first pressed, so a drag can be replayed as a slide
   private final float[] mTouchZoneDownX = new float[ButtonType.TOUCH_MAP_COUNT];
@@ -799,11 +801,12 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
         setTouchState(restored);
     }
 
-    // hand the new places to the native side so L3/R3 can hold them down straight away
+    // hand the new places to the native side so the pad can hold them down straight away
     syncTouchMapPositions();
     // repeated on every rebuild on purpose: the native session may not have existed when the
     // preference was first applied, and this is where it becomes live
     setPadTouchMapping(mPadTouchMapping);
+    setPadRearTouchMapping(mPadRearTouchMapping);
 
     invalidate();
   }
@@ -935,6 +938,9 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     final Canvas canvas = new Canvas(bitmap);
 
     final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    // rear points wear a dashed double ring: they report on the back of the console, so they are not
+    // places a finger on this screen ever reaches
+    final boolean rear = index >= ButtonType.TOUCH_MAP_REAR_FIRST;
     paint.setStyle(Paint.Style.FILL);
     paint.setColor(pressed ? 0xFFFF7A18 : 0x59101010);
     canvas.drawCircle(center, center, size * 0.40f, paint);
@@ -942,7 +948,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     paint.setStyle(Paint.Style.STROKE);
     paint.setStrokeWidth(size * 0.055f);
     paint.setColor(accent);
+    if (rear)
+      paint.setPathEffect(new DashPathEffect(new float[] { size * 0.06f, size * 0.045f }, 0f));
     canvas.drawCircle(center, center, size * 0.40f, paint);
+    paint.setPathEffect(null);
 
     // ticks just outside the ring make the exact touched spot easy to line up
     paint.setStrokeWidth(size * 0.03f);
@@ -1306,6 +1315,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native int setMappedTouchPosition(int slot, float normalizedX, float normalizedY);
   // lets the pad's L3/R3 hold points 1 and 2 down (the pad is polled natively, not here)
   public native void setPadTouchMapping(boolean enabled);
+  // lets the pad's L2/R2 hold the two rear points down, which report on the back panel
+  public native void setPadRearTouchMapping(boolean enabled);
   public native void clearMappedTouch();
 
   private LayoutBounds resolveLayoutBounds() {
@@ -1344,17 +1355,20 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     int resolvedOpacity = normalizedConfig.getOverlayOpacity();
     boolean resolvedTouchSwitchTilt = normalizedConfig.getTouchSwitchTilt();
     boolean resolvedPadTouchMapping = normalizedConfig.getPadTouchMapping();
+    boolean resolvedPadRearTouchMapping = normalizedConfig.getPadRearTouchMapping();
     boolean changed = !normalizedLayout.equals(mLayout)
             || Float.compare(mScale, resolvedScale) != 0
             || mOpacity != resolvedOpacity
             || mTouchSwitchTilt != resolvedTouchSwitchTilt
-            || mPadTouchMapping != resolvedPadTouchMapping;
+            || mPadTouchMapping != resolvedPadTouchMapping
+            || mPadRearTouchMapping != resolvedPadRearTouchMapping;
 
     mLayout = normalizedLayout;
     mScale = resolvedScale;
     mOpacity = resolvedOpacity;
     mTouchSwitchTilt = resolvedTouchSwitchTilt;
     mPadTouchMapping = resolvedPadTouchMapping;
+    mPadRearTouchMapping = resolvedPadRearTouchMapping;
 
     if (refresh && changed)
       refreshControls();
@@ -1390,12 +1404,16 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     public static final int TRIGGER_R3 = 25;
     public static final int BUTTON_TOUCH_HIDE = 1023;
     public static final int BUTTON_TOUCH_SWITCH = 1024;
-    // touch mapping points (also used as the layout key of each point)
+    // touch mapping points (also used as the layout key of each point). The last two sit on the
+    // rear panel: only the pad's L2/R2 press them, and they never report on the screen.
     public static final int TOUCH_MAP_1 = 1100;
     public static final int TOUCH_MAP_2 = 1101;
     public static final int TOUCH_MAP_3 = 1102;
     public static final int TOUCH_MAP_4 = 1103;
-    public static final int TOUCH_MAP_COUNT = 4;
+    public static final int TOUCH_MAP_5 = 1104;
+    public static final int TOUCH_MAP_6 = 1105;
+    public static final int TOUCH_MAP_REAR_FIRST = 4;
+    public static final int TOUCH_MAP_COUNT = 6;
   }
 
   // SDL values

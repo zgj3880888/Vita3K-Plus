@@ -552,32 +552,64 @@ static void apply_direct_pad(EmuEnvState &emuenv, uint32_t *buttons, float axes[
 }
 
 // L3 and R3 of a pad hold touch mapping points 1 and 2 down, which is what lets a game that asks for
-// a tap be played from a DS4 without reaching for the screen. The buttons are read straight from SDL
-// instead of from the bits handed to the guest: the Vita's L3/R3 only exist in the extended
-// (SceCtrlData2) read, so a game polling the plain buffer would never light this up.
+// a tap be played from a DS4 without reaching for the screen; L2 and R2 hold the two rear points,
+// which is the same trick for games that put extra buttons on the back of the console. The buttons
+// are read straight from SDL instead of from the bits handed to the guest: the Vita's L3/R3 and its
+// L2/R2 only exist in the extended (SceCtrlData2) read, so a game polling the plain buffer would
+// never light this up.
 static void sync_pad_touch_mapping(EmuEnvState &emuenv) {
     TouchState &touch = emuenv.touch;
-    if (!touch.pad_touch_mapping)
+    const bool wants_buttons = touch.pad_touch_mapping;
+    const bool wants_triggers = touch.pad_rear_touch_mapping;
+    if (!wants_buttons && !wants_triggers)
         return;
 
     const auto &binds = emuenv.cfg.controller_binds;
-    if (static_cast<size_t>(SDL_GAMEPAD_BUTTON_RIGHT_STICK) >= binds.size())
-        return;
+    const auto &axis_binds = emuenv.cfg.controller_axis_binds;
 
-    const auto l3 = static_cast<SDL_GamepadButton>(binds[SDL_GAMEPAD_BUTTON_LEFT_STICK]);
-    const auto r3 = static_cast<SDL_GamepadButton>(binds[SDL_GAMEPAD_BUTTON_RIGHT_STICK]);
+    // Both arrays come from the config, which may predate a button or an axis being added, so fall
+    // back to SDL's own layout rather than indexing past the end.
+    const auto button_for = [&](const size_t index) {
+        return static_cast<SDL_GamepadButton>(index < binds.size() ? binds[index] : static_cast<short>(index));
+    };
+    const auto axis_for = [&](const size_t index, const SDL_GamepadAxis fallback) {
+        return static_cast<SDL_GamepadAxis>(index < axis_binds.size() ? axis_binds[index] : static_cast<short>(fallback));
+    };
+
+    const auto l3 = button_for(SDL_GAMEPAD_BUTTON_LEFT_STICK);
+    const auto r3 = button_for(SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+    const auto l2_axis = axis_for(4, SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+    const auto r2_axis = axis_for(5, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER);
 
     bool l3_held = false;
     bool r3_held = false;
+    bool l2_held = false;
+    bool r2_held = false;
     for (const auto &[_, controller] : emuenv.ctrl.controllers) {
         if (!controller.controller)
             continue;
-        l3_held = l3_held || SDL_GetGamepadButton(controller.controller.get(), l3);
-        r3_held = r3_held || SDL_GetGamepadButton(controller.controller.get(), r3);
+        SDL_Gamepad *pad = controller.controller.get();
+        if (wants_buttons) {
+            l3_held = l3_held || SDL_GetGamepadButton(pad, l3);
+            r3_held = r3_held || SDL_GetGamepadButton(pad, r3);
+        }
+        if (wants_triggers) {
+            // The triggers are axes, not buttons. Half travel is enough, the same threshold the
+            // guest L2/R2 read uses, so a light pull already puts the finger down.
+            l2_held = l2_held || SDL_GetGamepadAxis(pad, l2_axis) > 0x3FFF;
+            r2_held = r2_held || SDL_GetGamepadAxis(pad, r2_axis) > 0x3FFF;
+        }
     }
 
-    set_mapped_touch_pad(touch, 0, l3_held);
-    set_mapped_touch_pad(touch, 1, r3_held);
+    if (wants_buttons) {
+        set_mapped_touch_pad(touch, 0, l3_held);
+        set_mapped_touch_pad(touch, 1, r3_held);
+    }
+    if (wants_triggers) {
+        // L2 and R2 drive the two rear points, which report on the back panel.
+        set_mapped_touch_pad(touch, MAPPED_TOUCH_REAR_FIRST, l2_held);
+        set_mapped_touch_pad(touch, MAPPED_TOUCH_REAR_FIRST + 1, r2_held);
+    }
 }
 
 static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool negative, bool from_ext_function, SceUInt32 &buttons, SceUInt8 &lx, SceUInt8 &ly, SceUInt8 &rx, SceUInt8 &ry) {
@@ -610,9 +642,9 @@ static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool n
     };
 
     if (state.input_intercepted() || emuenv.drop_inputs) {
-        // the pause menu is up: never let a pad button keep a finger on the panel
-        set_mapped_touch_pad(emuenv.touch, 0, false);
-        set_mapped_touch_pad(emuenv.touch, 1, false);
+        // the pause menu is up: never let a pad button keep a finger on the panel, front or back
+        for (int slot = 0; slot < MAX_MAPPED_TOUCH; slot++)
+            set_mapped_touch_pad(emuenv.touch, slot, false);
         reset_axes();
         return;
     }

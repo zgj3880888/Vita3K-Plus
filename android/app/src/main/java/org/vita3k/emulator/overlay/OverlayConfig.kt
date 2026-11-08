@@ -12,7 +12,9 @@ data class OverlayConfig(
     val hideOverlayWhenControllerConnected: Boolean = true,
     val touchSwitchTilt: Boolean = false,
     // L3 holds mapping point 1 and R3 holds point 2, so a pad can tap the panel on its own
-    val padTouchMapping: Boolean = true
+    val padTouchMapping: Boolean = true,
+    // L2 holds rear point 5 and R2 holds rear point 6, so a pad can use the back panel on its own
+    val padRearTouchMapping: Boolean = true
 ) {
     val controlsVisible: Boolean
         get() = overlayMask != 0
@@ -90,6 +92,9 @@ data class OverlayConfig(
 
     fun withPadTouchMapping(enabled: Boolean): OverlayConfig =
         copy(padTouchMapping = enabled).normalized()
+
+    fun withPadRearTouchMapping(enabled: Boolean): OverlayConfig =
+        copy(padRearTouchMapping = enabled).normalized()
 
     fun normalized(): OverlayConfig {
         val knownMask = InputOverlay.OVERLAY_MASK_BASIC or

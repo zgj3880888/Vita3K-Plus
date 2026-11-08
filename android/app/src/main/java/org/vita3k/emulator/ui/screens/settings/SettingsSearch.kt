@@ -54,6 +54,7 @@ internal fun rememberSettingsSearchEntries(
 
     return remember(context, configuration, isPerApp, isVulkan, showCustomDriverOptions, showTurboModeOption) { buildList {
         add(entry(SettingsCategory.Cheats, R.string.settings_cheats_title, R.string.settings_cheats_help_body, keywords = "cheat codes psv goldfinger"))
+        add(entry(SettingsCategory.RearTouch, R.string.settings_rear_touch_l2r2, R.string.settings_rear_touch_l2r2_desc, keywords = "rear touch back panel l2 r2 trigger gamepad dualshock ds4 背触 背部触摸板 扳机 手柄"))
         add(entry(SettingsCategory.Core, R.string.settings_modules_mode, R.string.settings_modules_automatic_desc))
         add(entry(SettingsCategory.Core, R.string.settings_modules_list_title, keywords = "lle modules firmware"))
         add(entry(SettingsCategory.Cpu, R.string.settings_cpu_opt, R.string.settings_cpu_opt_desc))

@@ -303,6 +303,11 @@ internal fun SettingsCategoryBody(
             onUpdate = onUpdate,
             onShowHelp = onShowHelp
         )
+        SettingsCategory.RearTouch -> RearTouchSettingsSection(
+            overlayConfig = overlayConfig,
+            onOverlayConfigChange = onOverlayConfigChange,
+            onShowHelp = onShowHelp
+        )
         SettingsCategory.Cheats -> CheatsSettingsSection(
             titleId = titleId,
             onShowHelp = onShowHelp

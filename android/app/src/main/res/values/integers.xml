@@ -44,4 +44,8 @@
     <integer name="TOUCH_MAP_3_Y">150</integer>
     <integer name="TOUCH_MAP_4_X">680</integer>
     <integer name="TOUCH_MAP_4_Y">150</integer>
+    <integer name="TOUCH_MAP_5_X">300</integer>
+    <integer name="TOUCH_MAP_5_Y">640</integer>
+    <integer name="TOUCH_MAP_6_X">650</integer>
+    <integer name="TOUCH_MAP_6_Y">640</integer>
 </resources>

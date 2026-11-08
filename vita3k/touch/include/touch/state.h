@@ -14,6 +14,12 @@
 // buttons instead of reaching for the screen.
 static constexpr int MAX_MAPPED_TOUCH = 8;
 
+// Points from this slot on report on the rear panel instead of the screen, whatever the front/back
+// switch says, and the pad's L2/R2 are what hold them down. They exist for the games that put extra
+// buttons on the back of the console: reaching for the screen is exactly what a pad player cannot
+// do, so the triggers stand in for the fingers nobody has there.
+static constexpr int MAPPED_TOUCH_REAR_FIRST = 4;
+
 struct MappedTouch {
     bool active = false;
     bool pad_active = false; // held by a pad button rather than a finger on the overlay ring
@@ -67,6 +73,10 @@ struct TouchState {
     // asks for a tap playable on a DS4 alone, without reaching for the screen. Atomic because the
     // ctrl thread reads it on every input poll while the UI thread writes it from a setting.
     std::atomic<bool> pad_touch_mapping{ true };
+    // When set, the pad's L2 and R2 hold the two rear points down, which is what makes a game that
+    // puts extra buttons on the back of the console playable from the pad alone. Kept apart from the
+    // switch above on purpose: a game can want one and not the other, and each is set per game.
+    std::atomic<bool> pad_rear_touch_mapping{ true };
     static constexpr SceInt16 initial_pinch_dist = 300;
     SceInt16 pinch_dist = initial_pinch_dist;
     SceInt16 pinch_speed = 40;

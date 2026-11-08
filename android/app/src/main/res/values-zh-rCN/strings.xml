@@ -355,6 +355,13 @@
     <string name="settings_tab_debug">调试</string>
     <string name="settings_tab_emulator">模拟器</string>
     <string name="settings_tab_cheats">金手指</string>
+    <string name="settings_tab_rear_touch">背触</string>
+
+    <!-- Settings - Rear touch tab -->
+    <string name="settings_rear_touch_l2r2">L2/R2 背触映射</string>
+    <string name="settings_rear_touch_l2r2_summary">按住 L2 即在背部触摸板的 5 号点压一根手指，按住 R2 对应 6 号点，需要背触的游戏用手柄就能玩。</string>
+    <string name="settings_rear_touch_l2r2_desc">开启后，扣下 L2 相当于在 Vita 背部触摸板的 5 号映射点位置用一根手指按住，R2 对应 6 号点。这两个点始终报在背板上，不受前触屏/后触屏开关影响，圆环画成虚线双圈，一眼能认出来。在按键布局编辑里把它们拖到游戏当作按钮的区域，之后不用伸手到机身背面：屏幕上一个字都不用显示，虚拟按键隐藏时也照样生效。L2/R2 原有的 Vita 按键功能同时保留，绝大多数游戏不会用到。如果某个游戏把这两个扳机用作别的用途，把这个开关关掉即可。</string>
+    <string name="settings_rear_touch_note">5、6 号就是按键布局编辑里那两个虚线圆环；1-4 号仍作用于屏幕，继续跟随前触屏/后触屏开关。这个开关按游戏单独保存，存在该游戏的按键布局里。</string>
 
     <!-- Settings - Cheats tab -->
     <string name="settings_cheats_title">金手指</string>
