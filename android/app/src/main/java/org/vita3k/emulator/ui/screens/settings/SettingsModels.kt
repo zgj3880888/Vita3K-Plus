@@ -46,7 +46,7 @@ internal enum class SettingsCategory(
     RearTouch(R.string.settings_tab_rear_touch, Icons.Default.SportsEsports),
     // follows the rear panel page because it answers the next question about the same points: the
     // page before says which button presses them, this one says where the finger goes afterwards
-    TouchGesture(R.string.settings_tab_touch_gesture, Icons.Default.Swipe),
+    TouchGesture(R.string.settings_tab_touch_gesture, Icons.Default.TouchApp),
     Cheats(R.string.settings_tab_cheats, Icons.Default.Code),
     Debug(R.string.settings_tab_debug, Icons.Default.BugReport)
 }
