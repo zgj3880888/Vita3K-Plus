@@ -69,6 +69,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private boolean mTouchSwitchTilt = false;
   private boolean mPadTouchMapping = true;
   private boolean mPadRearTouchMapping = true;
+  private boolean mPadRearTouchSwipe = false;
   private OverlayLayout mLayout;
   // where each touch mapping point was first pressed, so a drag can be replayed as a slide
   private final float[] mTouchZoneDownX = new float[ButtonType.TOUCH_MAP_COUNT];
@@ -807,6 +808,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     // preference was first applied, and this is where it becomes live
     setPadTouchMapping(mPadTouchMapping);
     setPadRearTouchMapping(mPadRearTouchMapping);
+    setPadRearTouchSwipe(mPadRearTouchSwipe);
 
     invalidate();
   }
@@ -1317,6 +1319,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native void setPadTouchMapping(boolean enabled);
   // lets the pad's L2/R2 hold the two rear points down, which report on the back panel
   public native void setPadRearTouchMapping(boolean enabled);
+  // picks tap (false) or a downward stroke across the back panel (true) for those two points
+  public native void setPadRearTouchSwipe(boolean enabled);
   public native void clearMappedTouch();
 
   private LayoutBounds resolveLayoutBounds() {
@@ -1356,12 +1360,14 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     boolean resolvedTouchSwitchTilt = normalizedConfig.getTouchSwitchTilt();
     boolean resolvedPadTouchMapping = normalizedConfig.getPadTouchMapping();
     boolean resolvedPadRearTouchMapping = normalizedConfig.getPadRearTouchMapping();
+    boolean resolvedPadRearTouchSwipe = normalizedConfig.getPadRearTouchSwipe();
     boolean changed = !normalizedLayout.equals(mLayout)
             || Float.compare(mScale, resolvedScale) != 0
             || mOpacity != resolvedOpacity
             || mTouchSwitchTilt != resolvedTouchSwitchTilt
             || mPadTouchMapping != resolvedPadTouchMapping
-            || mPadRearTouchMapping != resolvedPadRearTouchMapping;
+            || mPadRearTouchMapping != resolvedPadRearTouchMapping
+            || mPadRearTouchSwipe != resolvedPadRearTouchSwipe;
 
     mLayout = normalizedLayout;
     mScale = resolvedScale;
@@ -1369,6 +1375,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     mTouchSwitchTilt = resolvedTouchSwitchTilt;
     mPadTouchMapping = resolvedPadTouchMapping;
     mPadRearTouchMapping = resolvedPadRearTouchMapping;
+    mPadRearTouchSwipe = resolvedPadRearTouchSwipe;
 
     if (refresh && changed)
       refreshControls();

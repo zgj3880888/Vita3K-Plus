@@ -25,6 +25,7 @@ object OverlayStore {
     private const val KEY_TOUCH_SWITCH_TILT = "overlay_touch_switch_tilt"
     private const val KEY_PAD_TOUCH_MAP = "overlay_pad_touch_map"
     private const val KEY_PAD_REAR_TOUCH_MAP = "overlay_pad_rear_touch_map"
+    private const val KEY_PAD_REAR_TOUCH_SWIPE = "overlay_pad_rear_touch_swipe"
     private const val KEY_CONFIG_PREFIX = "config"
     private const val KEY_LAYOUT_PREFIX = "layout"
     private const val KEY_POSITION_X_SUFFIX = ":x"
@@ -220,6 +221,7 @@ object OverlayStore {
             putBoolean(configKey(normalizedScopeId, KEY_TOUCH_SWITCH_TILT), normalizedState.config.touchSwitchTilt)
             putBoolean(configKey(normalizedScopeId, KEY_PAD_TOUCH_MAP), normalizedState.config.padTouchMapping)
             putBoolean(configKey(normalizedScopeId, KEY_PAD_REAR_TOUCH_MAP), normalizedState.config.padRearTouchMapping)
+            putBoolean(configKey(normalizedScopeId, KEY_PAD_REAR_TOUCH_SWIPE), normalizedState.config.padRearTouchSwipe)
             saveLayoutEntries(this, normalizedScopeId, normalizedState.layout)
             if (markOverride && normalizedScopeId.isNotEmpty()) {
                 putBoolean(overrideEnabledKey(normalizedScopeId), true)
@@ -249,7 +251,8 @@ object OverlayStore {
             hideOverlayWhenControllerConnected = prefs.getBoolean(keys[3], fallback.hideOverlayWhenControllerConnected),
             touchSwitchTilt = prefs.getBoolean(configKey(scopeId, KEY_TOUCH_SWITCH_TILT), fallback.touchSwitchTilt),
             padTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_TOUCH_MAP), fallback.padTouchMapping),
-            padRearTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_REAR_TOUCH_MAP), fallback.padRearTouchMapping)
+            padRearTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_REAR_TOUCH_MAP), fallback.padRearTouchMapping),
+            padRearTouchSwipe = prefs.getBoolean(configKey(scopeId, KEY_PAD_REAR_TOUCH_SWIPE), fallback.padRearTouchSwipe)
         ).normalized()
     }
 

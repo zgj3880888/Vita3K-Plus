@@ -24,6 +24,12 @@ struct MappedTouch {
     bool active = false;
     bool pad_active = false; // held by a pad button rather than a finger on the overlay ring
     bool has_position = false; // the overlay told us where this point sits
+    // A rear point can be handed to the trigger as a swipe instead of a tap. A tap only ever reports
+    // one finger sitting still, which is fine for games that treat the back panel as a button and
+    // useless for the ones that read it as a gesture: those want to see the finger travel.
+    bool swipe_started = false; // the trigger is running a stroke instead of holding a spot
+    bool swipe_release = false; // released early; finish the stroke before lifting the finger
+    uint64_t swipe_start_us = 0;
     float x = 0.f; // normalized over the drawable area, same space as SDL finger events
     float y = 0.f;
     uint8_t id = 0; // touch id handed out when the point goes down
@@ -77,6 +83,11 @@ struct TouchState {
     // puts extra buttons on the back of the console playable from the pad alone. Kept apart from the
     // switch above on purpose: a game can want one and not the other, and each is set per game.
     std::atomic<bool> pad_rear_touch_mapping{ true };
+    // When set, a rear point held by L2/R2 is delivered as a stroke down the panel instead of a
+    // finger parked on one spot. Games that use the back panel as a gesture ignore a stationary
+    // touch, and a stationary touch is all a tap can produce; this is the switch that lets the
+    // player pick whichever of the two the game in front of them actually understands.
+    std::atomic<bool> pad_rear_touch_swipe{ false };
     static constexpr SceInt16 initial_pinch_dist = 300;
     SceInt16 pinch_dist = initial_pinch_dist;
     SceInt16 pinch_speed = 40;

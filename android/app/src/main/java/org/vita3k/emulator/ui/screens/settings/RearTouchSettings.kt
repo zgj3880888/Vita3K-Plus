@@ -13,9 +13,11 @@ import org.vita3k.emulator.overlay.OverlayConfig
  * number of games put real buttons there; a pad player has no finger to spare back there, so the
  * triggers stand in for it.
  *
- * One switch, because that is all there is to decide: the places the fingers land are mapping points
- * 5 and 6, which the controls editor already lets the player drag around, and those two always
- * report on the back panel whatever the front/back switch says.
+ * Two switches: whether L2/R2 drive the rear points at all, and how the finger they stand for
+ * behaves. A tap reports one finger sitting still, which is what a game that treats the back panel
+ * as a button wants; a stroke drags that finger from the top of the panel to the bottom, which is
+ * what a game that reads the panel as a gesture needs. Plenty of games only understand one of the
+ * two, so the choice is the player's.
  */
 @Composable
 internal fun RearTouchSettingsSection(
@@ -35,6 +37,20 @@ internal fun RearTouchSettingsSection(
             help = SettingsHelpEntry(
                 title = stringResource(R.string.settings_rear_touch_l2r2),
                 body = stringResource(R.string.settings_rear_touch_l2r2_desc),
+                scope = SettingsScope.Both
+            ),
+            onShowHelp = onShowHelp
+        )
+        SettingsToggleRow(
+            title = stringResource(R.string.settings_rear_touch_swipe),
+            checked = overlayConfig.padRearTouchSwipe,
+            onCheckedChange = { onOverlayConfigChange(overlayConfig.withPadRearTouchSwipe(it)) },
+            // meaningless while the triggers do not drive the panel at all
+            enabled = overlayConfig.padRearTouchMapping,
+            summary = stringResource(R.string.settings_rear_touch_swipe_summary),
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_rear_touch_swipe),
+                body = stringResource(R.string.settings_rear_touch_swipe_desc),
                 scope = SettingsScope.Both
             ),
             onShowHelp = onShowHelp

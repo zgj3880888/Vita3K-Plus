@@ -26,6 +26,10 @@ int set_mapped_touch_pad(TouchState &state, int slot, bool active);
 // Turning one off lifts whatever that switch was holding, so no finger is left on the panel.
 void set_pad_touch_mapping(TouchState &state, bool enabled);
 void set_pad_rear_touch_mapping(TouchState &state, bool enabled);
+// Picks how a rear point held by L2/R2 reaches the guest: a finger parked on the spot (off) or a
+// stroke down the panel (on). Games that read the back panel as a gesture do not react to the
+// former, which is the whole reason this exists.
+void set_pad_rear_touch_swipe(TouchState &state, bool enabled);
 void clear_mapped_touch(TouchState &state);
 int toggle_touchscreen(TouchState &state);
 int touch_get(const SceUID thread_id, EmuEnvState &emuenv, const SceUInt32 &port, SceTouchData *pData, SceUInt32 count, bool is_peek);
