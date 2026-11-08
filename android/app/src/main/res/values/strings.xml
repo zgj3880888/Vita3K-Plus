@@ -364,6 +364,19 @@
     <string name="settings_rear_touch_swipe_summary">L2/R2 drag the finger from the top of the back panel to the bottom instead of holding it still, for games that only react to a swipe.</string>
     <string name="settings_rear_touch_swipe_desc">Some games read the back panel as a gesture rather than a button: a finger that sits still never registers, so the tap mode above does nothing in them. Turn this on and the trigger drags that finger from the top edge of the panel to the bottom edge in one stroke, keeping the left/right place of point 5 or point 6. The stroke finishes on its own even if the trigger is let go halfway, so a quick tap still counts as a full swipe. Leave it off for games that treat the panel as a button, where a finger on the move would scroll or turn the camera instead.</string>
     <string name="settings_rear_touch_note">Points 5 and 6 are the two dashed rings in the controls editor. Points 1-4 stay on the screen and keep following the front/back touch switch. Switch this per game: the setting is stored with the game\'s own controls layout.</string>
+    <string name="settings_tab_touch_gesture">Touch gestures</string>
+    <string name="settings_touch_gesture_intro">Choose what the finger does while a button holds a mapping point down. A tap keeps it still, which only works on games that treat the panel as a button; a swipe or a rub makes it travel, which is what games that read the panel as a gesture are looking for.</string>
+    <string name="settings_touch_gesture_point">Point %1$d (%2$s)</string>
+    <string name="settings_touch_gesture_point_rear">Point %1$d (%2$s, rear)</string>
+    <string name="settings_touch_gesture_none">Tap</string>
+    <string name="settings_touch_gesture_up">Swipe up</string>
+    <string name="settings_touch_gesture_down">Swipe down</string>
+    <string name="settings_touch_gesture_left">Swipe left</string>
+    <string name="settings_touch_gesture_right">Swipe right</string>
+    <string name="settings_touch_gesture_rub_h">Rub across</string>
+    <string name="settings_touch_gesture_rub_v">Rub up-down</string>
+    <string name="settings_touch_gesture_desc">A tap reports one finger pressed on the spot and never moving. A swipe runs the finger from one side of the point to the other once and leaves it at the far end until you let go; a rub swings it back and forth a few times and finishes where it started. Each stroke takes a fraction of a second and completes on its own even if the button is released halfway, so a quick tap still counts as a full gesture. If the game reacts as if you dragged the view, the point is set to a stroke and wants a plain tap instead; if it does nothing at all, it is the other way round. Everything stays where it was put: this changes what the finger does, not where the points are.</string>
+    <string name="settings_touch_gesture_note">Points 1 and 2 follow the L3/R3 switch on the controls page, points 5 and 6 follow L2/R2 on the rear touch page; a point whose switch is off is greyed out here. Points 3 and 4 are not listed because no button presses them. Saved per game with the rest of the controls layout. On points 5 and 6, leaving this on Tap while the rear touch page has its swipe switch on keeps the old full-height stroke down the back panel.</string>
 
     <!-- Settings - Cheats tab -->
     <string name="settings_cheats_title">Cheat codes</string>

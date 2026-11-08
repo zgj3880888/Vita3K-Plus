@@ -44,6 +44,9 @@ internal enum class SettingsCategory(
     // sits next to Cheats on purpose: both are the "make this game playable for me" switches, and
     // the rear panel is the one place a pad player cannot reach without help
     RearTouch(R.string.settings_tab_rear_touch, Icons.Default.SportsEsports),
+    // follows the rear panel page because it answers the next question about the same points: the
+    // page before says which button presses them, this one says where the finger goes afterwards
+    TouchGesture(R.string.settings_tab_touch_gesture, Icons.Default.Swipe),
     Cheats(R.string.settings_tab_cheats, Icons.Default.Code),
     Debug(R.string.settings_tab_debug, Icons.Default.BugReport)
 }

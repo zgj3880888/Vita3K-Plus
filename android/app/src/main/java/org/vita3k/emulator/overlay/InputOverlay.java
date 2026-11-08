@@ -23,7 +23,9 @@ import android.view.SurfaceView;
 import android.view.View;
 import android.view.View.OnTouchListener;
 
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -70,6 +72,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private boolean mPadTouchMapping = true;
   private boolean mPadRearTouchMapping = true;
   private boolean mPadRearTouchSwipe = false;
+  // what each mapping point does while a pad button holds it down; 0 keeps the plain tap
+  private int[] mPadTouchGestures = new int[ButtonType.TOUCH_MAP_COUNT];
   private OverlayLayout mLayout;
   // where each touch mapping point was first pressed, so a drag can be replayed as a slide
   private final float[] mTouchZoneDownX = new float[ButtonType.TOUCH_MAP_COUNT];
@@ -809,6 +813,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     setPadTouchMapping(mPadTouchMapping);
     setPadRearTouchMapping(mPadRearTouchMapping);
     setPadRearTouchSwipe(mPadRearTouchSwipe);
+    // Repeated every rebuild like the switches above: a point can be held by a pad button long
+    // before the settings screen that chose its stroke was ever opened.
+    for (int i = 0; i < ButtonType.TOUCH_MAP_COUNT; i++)
+      setMappedTouchGesture(i, mPadTouchGestures[i]);
 
     invalidate();
   }
@@ -1321,6 +1329,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native void setPadRearTouchMapping(boolean enabled);
   // picks tap (false) or a downward stroke across the back panel (true) for those two points
   public native void setPadRearTouchSwipe(boolean enabled);
+  // what the finger does while a pad button holds a point down: 0 stays put, the rest run a stroke
+  public native void setMappedTouchGesture(int slot, int gesture);
   public native void clearMappedTouch();
 
   private LayoutBounds resolveLayoutBounds() {
@@ -1361,13 +1371,15 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     boolean resolvedPadTouchMapping = normalizedConfig.getPadTouchMapping();
     boolean resolvedPadRearTouchMapping = normalizedConfig.getPadRearTouchMapping();
     boolean resolvedPadRearTouchSwipe = normalizedConfig.getPadRearTouchSwipe();
+    int[] resolvedPadTouchGestures = resolveGestures(normalizedConfig.getPadTouchGestures());
     boolean changed = !normalizedLayout.equals(mLayout)
             || Float.compare(mScale, resolvedScale) != 0
             || mOpacity != resolvedOpacity
             || mTouchSwitchTilt != resolvedTouchSwitchTilt
             || mPadTouchMapping != resolvedPadTouchMapping
             || mPadRearTouchMapping != resolvedPadRearTouchMapping
-            || mPadRearTouchSwipe != resolvedPadRearTouchSwipe;
+            || mPadRearTouchSwipe != resolvedPadRearTouchSwipe
+            || !Arrays.equals(mPadTouchGestures, resolvedPadTouchGestures);
 
     mLayout = normalizedLayout;
     mScale = resolvedScale;
@@ -1376,9 +1388,23 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     mPadTouchMapping = resolvedPadTouchMapping;
     mPadRearTouchMapping = resolvedPadRearTouchMapping;
     mPadRearTouchSwipe = resolvedPadRearTouchSwipe;
+    mPadTouchGestures = resolvedPadTouchGestures;
 
     if (refresh && changed)
       refreshControls();
+  }
+
+  // The config carries one gesture per point, but a list read back from storage can be short or hold
+  // a null: pad it out so the native side always gets a full set of slots.
+  private static int[] resolveGestures(List<Integer> gestures) {
+    int[] resolved = new int[ButtonType.TOUCH_MAP_COUNT];
+    if (gestures == null)
+      return resolved;
+    for (int i = 0; i < resolved.length && i < gestures.size(); i++) {
+      Integer value = gestures.get(i);
+      resolved[i] = value != null ? value : 0;
+    }
+    return resolved;
   }
 
   private static final class LayoutBounds {

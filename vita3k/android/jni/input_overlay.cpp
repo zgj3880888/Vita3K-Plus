@@ -165,6 +165,15 @@ Java_org_vita3k_emulator_overlay_InputOverlay_setPadRearTouchSwipe(JNIEnv *env, 
 }
 
 JNIEXPORT void JNICALL
+Java_org_vita3k_emulator_overlay_InputOverlay_setMappedTouchGesture(JNIEnv *env, jobject thiz, jint slot, jint gesture) {
+    auto *emuenv = get_emuenv();
+    if (!emuenv)
+        return;
+
+    set_mapped_touch_gesture(emuenv->touch, static_cast<int>(slot), static_cast<int>(gesture));
+}
+
+JNIEXPORT void JNICALL
 Java_org_vita3k_emulator_overlay_InputOverlay_clearMappedTouch(JNIEnv *env, jobject thiz) {
     auto *emuenv = get_emuenv();
     if (emuenv)

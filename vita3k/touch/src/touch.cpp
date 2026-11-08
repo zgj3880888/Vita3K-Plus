@@ -59,6 +59,18 @@ constexpr uint64_t REAR_SWIPE_US = 180000;
 constexpr float REAR_SWIPE_FROM_Y = 0.10f;
 constexpr float REAR_SWIPE_TO_Y = 0.90f;
 
+// A mapping point told to run a gesture instead of holding still travels this much of the panel and
+// takes this long. A swipe is a single pass ending at the far side; a rub swings between the two
+// ends a whole number of times, so it finishes back where it started, which leaves the finger on
+// the spot the game last saw it at instead of drifting a little further across the screen on every
+// press. Both ends are measured around wherever the player put the point.
+constexpr uint64_t SWIPE_US = 200000;
+constexpr float SWIPE_SPAN = 0.30f;
+constexpr uint64_t RUB_US = 700000;
+constexpr float RUB_SPAN = 0.36f;
+constexpr float RUB_PASSES = 2.5f;
+constexpr float TWO_PI = 6.28318530718f;
+
 static uint64_t touch_now_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -302,18 +314,29 @@ void touch_vsync_update(EmuEnvState &emuenv) {
                     if (!wants_port)
                         continue;
                     // the point is over the letterbox rather than the panel: nothing to report
-                    // A stale start time would put the stroke somewhere absurd, so anything ahead
-                    // of the clock counts as "not started yet" rather than wrapping around.
-                    const uint64_t swipe_elapsed = (mapped_now_us > point.swipe_start_us)
-                        ? mapped_now_us - point.swipe_start_us
-                        : 0;
-                    const float swipe_t = std::min(1.f, static_cast<float>(swipe_elapsed) / static_cast<float>(REAR_SWIPE_US));
-                    // Rear points handed to the trigger as a stroke walk down the panel, keeping the
-                    // x the player placed them at; a point held as a tap stays where it was put.
-                    const float point_y = (slot >= MAPPED_TOUCH_REAR_FIRST && point.swipe_started)
-                        ? (REAR_SWIPE_FROM_Y + (REAR_SWIPE_TO_Y - REAR_SWIPE_FROM_Y) * swipe_t)
-                        : point.y;
-                    const float x = (point.x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
+                    // A stroke moves the finger between its two ends as time runs; a point held as a
+                    // tap has no stroke and stays where it was put. A start time ahead of the clock
+                    // would put the stroke somewhere absurd, so anything in the future counts as
+                    // "not started yet" rather than wrapping round.
+                    float point_x = point.x;
+                    float point_y = point.y;
+                    if (point.stroke_started) {
+                        const uint64_t stroke_elapsed = (mapped_now_us > point.stroke_start_us)
+                            ? mapped_now_us - point.stroke_start_us
+                            : 0;
+                        const float stroke_t = (point.stroke_duration_us == 0)
+                            ? 1.f
+                            : std::min(1.f, static_cast<float>(stroke_elapsed) / static_cast<float>(point.stroke_duration_us));
+                        // A rub swings out and comes back, so it ends where it began; a swipe is a
+                        // plain ramp that stays at the far end until the button is let go.
+                        const bool rubbing = point.stroke_gesture == TOUCH_GESTURE_RUB_H || point.stroke_gesture == TOUCH_GESTURE_RUB_V;
+                        const float travel = rubbing
+                            ? (0.5f - 0.5f * std::cos(stroke_t * TWO_PI * RUB_PASSES))
+                            : stroke_t;
+                        point_x = point.stroke_from_x + (point.stroke_to_x - point.stroke_from_x) * travel;
+                        point_y = point.stroke_from_y + (point.stroke_to_y - point.stroke_from_y) * travel;
+                    }
+                    const float x = (point_x * emuenv.display.viewport_drawable_w - emuenv.display.viewport_x) / emuenv.display.viewport_w;
                     const float y = (point_y * emuenv.display.viewport_drawable_h - emuenv.display.viewport_y) / emuenv.display.viewport_h;
                     if (!(x >= 0.f) || !(y >= 0.f) || x >= 1.f || y >= 1.f)
                         continue;
@@ -341,6 +364,95 @@ static void mapped_touch_down(TouchState &state, MappedTouch &point) {
 
     point.id = static_cast<uint8_t>(state.next_touch_id);
     state.next_touch_id = (state.next_touch_id + 1) % 128;
+}
+
+// Keeps both ends of a stroke on the panel. A stroke that ran off the edge would take the finger
+// off the panel halfway through, and a finger leaving the panel reads as a lift, which ends the
+// gesture before the game ever sees where it was heading. Both ends shift together, so the stroke
+// keeps the length the gesture asked for.
+static void fit_stroke_on_panel(float &from, float &to) {
+    constexpr float margin = 0.05f;
+    const float low = std::min(from, to);
+    const float high = std::max(from, to);
+    float shift = 0.f;
+    if (low < margin && high <= 1.f - margin)
+        shift = margin - low;
+    else if (high > 1.f - margin && low >= margin)
+        shift = (1.f - margin) - high;
+    from += shift;
+    to += shift;
+}
+
+// Works out the two ends of the stroke this press should run. The player's choice for the point
+// wins; with none set, the rear panel switch can still ask for the stroke down the back of the
+// panel that earlier builds had, so that switch keeps behaving exactly as it did.
+static void begin_stroke(MappedTouch &point, const bool rear_swipe) {
+    uint8_t gesture = point.gesture;
+    if (gesture == TOUCH_GESTURE_NONE && rear_swipe)
+        gesture = TOUCH_GESTURE_DOWN;
+
+    point.stroke_gesture = gesture;
+    point.stroke_started = false;
+    point.stroke_release = false;
+    if (gesture == TOUCH_GESTURE_NONE)
+        return;
+
+    const float half = SWIPE_SPAN * 0.5f;
+    const float rub_half = RUB_SPAN * 0.5f;
+    float from_x = point.x;
+    float from_y = point.y;
+    float to_x = point.x;
+    float to_y = point.y;
+    uint64_t duration = SWIPE_US;
+
+    switch (gesture) {
+    case TOUCH_GESTURE_UP:
+        from_y = point.y + half;
+        to_y = point.y - half;
+        break;
+    case TOUCH_GESTURE_DOWN:
+        // the rear panel switch has always run the full height of the panel, and games were tuned
+        // against that, so it keeps its own span; a gesture runs the shorter one around the point
+        if (rear_swipe && point.gesture == TOUCH_GESTURE_NONE) {
+            from_y = REAR_SWIPE_FROM_Y;
+            to_y = REAR_SWIPE_TO_Y;
+            duration = REAR_SWIPE_US;
+        } else {
+            from_y = point.y - half;
+            to_y = point.y + half;
+        }
+        break;
+    case TOUCH_GESTURE_LEFT:
+        from_x = point.x + half;
+        to_x = point.x - half;
+        break;
+    case TOUCH_GESTURE_RIGHT:
+        from_x = point.x - half;
+        to_x = point.x + half;
+        break;
+    case TOUCH_GESTURE_RUB_H:
+        from_x = point.x - rub_half;
+        to_x = point.x + rub_half;
+        duration = RUB_US;
+        break;
+    case TOUCH_GESTURE_RUB_V:
+        from_y = point.y - rub_half;
+        to_y = point.y + rub_half;
+        duration = RUB_US;
+        break;
+    default:
+        return;
+    }
+
+    fit_stroke_on_panel(from_x, to_x);
+    fit_stroke_on_panel(from_y, to_y);
+    point.stroke_from_x = from_x;
+    point.stroke_from_y = from_y;
+    point.stroke_to_x = to_x;
+    point.stroke_to_y = to_y;
+    point.stroke_duration_us = duration;
+    point.stroke_started = true;
+    point.stroke_start_us = touch_now_us();
 }
 
 int set_mapped_touch(TouchState &state, const int slot, const float x, const float y, const bool active) {
@@ -384,25 +496,25 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
     MappedTouch &point = state.mapped_touch[slot];
     const bool rear_swipe = slot >= MAPPED_TOUCH_REAR_FIRST && state.pad_rear_touch_swipe;
     if (!active) {
-        // A stroke that has not reached the bottom yet keeps the finger down for the rest of it.
-        // Lifting on release would leave a stroke that travelled a couple of pixels and stopped,
-        // which is exactly the thing a gesture-reading game ignores; this is also what makes a
-        // quick tap on the trigger produce a complete stroke. The ctrl side polls every frame, so
-        // the release lands on the first poll after the stroke ends.
-        if (point.swipe_started && touch_now_us() - point.swipe_start_us < REAR_SWIPE_US) {
-            point.swipe_release = true;
+        // A stroke that has not finished keeps the finger down for the rest of it. Lifting on
+        // release would leave a stroke that travelled a couple of pixels and stopped, which is
+        // exactly the thing a gesture-reading game ignores; this is also what makes a quick tap on
+        // the button produce a complete stroke. The ctrl side polls every frame, so the release
+        // lands on the first poll after the stroke ends.
+        if (point.stroke_started && touch_now_us() - point.stroke_start_us < point.stroke_duration_us) {
+            point.stroke_release = true;
             return 0;
         }
         point.pad_active = false;
-        point.swipe_started = false;
-        point.swipe_release = false;
+        point.stroke_started = false;
+        point.stroke_release = false;
         return 0;
     }
 
     // Pressed again while a release was still finishing its stroke: carry on from there instead of
     // restarting, so a player tapping in rhythm does not cut the stroke short every time.
-    if (point.swipe_started) {
-        point.swipe_release = false;
+    if (point.stroke_started) {
+        point.stroke_release = false;
         return 0;
     }
 
@@ -415,13 +527,11 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
     const bool was_held = point.pad_active;
     mapped_touch_down(state, point);
     point.pad_active = true;
-    if (rear_swipe) {
-        point.swipe_started = true;
-        point.swipe_release = false;
-        point.swipe_start_us = touch_now_us();
-    }
+    begin_stroke(point, rear_swipe);
     if (!was_held) {
-        if (slot >= MAPPED_TOUCH_REAR_FIRST)
+        if (point.stroke_started)
+            LOG_INFO_ONCE("[TOUCH] pad button runs a touch gesture from a mapping point");
+        else if (slot >= MAPPED_TOUCH_REAR_FIRST)
             LOG_INFO_ONCE("[TOUCH] pad L2/R2 press a rear touch mapping point");
         else
             LOG_INFO_ONCE("[TOUCH] pad L3/R3 press a mapping point of the touch panel");
@@ -429,12 +539,30 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
     return 0;
 }
 
+void set_mapped_touch_gesture(TouchState &state, const int slot, const int gesture) {
+    if (slot < 0 || slot >= MAX_MAPPED_TOUCH)
+        return;
+
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    MappedTouch &point = state.mapped_touch[slot];
+    point.gesture = (gesture > TOUCH_GESTURE_NONE && gesture < TOUCH_GESTURE_COUNT)
+        ? static_cast<uint8_t>(gesture)
+        : TOUCH_GESTURE_NONE;
+    // Changing the choice while the button is down must not leave a half-travelled finger behind:
+    // the stroke in flight finishes, and the new choice is what the next press runs.
+    if (!point.stroke_started)
+        point.stroke_gesture = point.gesture;
+}
+
 void set_pad_touch_mapping(TouchState &state, const bool enabled) {
     const std::lock_guard<std::mutex> lock(state.finger_mutex);
     state.pad_touch_mapping = enabled;
     if (!enabled) {
-        for (int slot = 0; slot < MAPPED_TOUCH_REAR_FIRST; slot++)
+        for (int slot = 0; slot < MAPPED_TOUCH_REAR_FIRST; slot++) {
             state.mapped_touch[slot].pad_active = false;
+            state.mapped_touch[slot].stroke_started = false;
+            state.mapped_touch[slot].stroke_release = false;
+        }
     }
 }
 
@@ -444,8 +572,8 @@ void set_pad_rear_touch_mapping(TouchState &state, const bool enabled) {
     if (!enabled) {
         for (int slot = MAPPED_TOUCH_REAR_FIRST; slot < MAX_MAPPED_TOUCH; slot++) {
             state.mapped_touch[slot].pad_active = false;
-            state.mapped_touch[slot].swipe_started = false;
-            state.mapped_touch[slot].swipe_release = false;
+            state.mapped_touch[slot].stroke_started = false;
+            state.mapped_touch[slot].stroke_release = false;
         }
     }
 }
@@ -456,8 +584,8 @@ void set_pad_rear_touch_swipe(TouchState &state, const bool enabled) {
     if (!enabled) {
         // Switching back to taps mid-stroke: drop the stroke state, the next press starts a tap.
         for (int slot = MAPPED_TOUCH_REAR_FIRST; slot < MAX_MAPPED_TOUCH; slot++) {
-            state.mapped_touch[slot].swipe_started = false;
-            state.mapped_touch[slot].swipe_release = false;
+            state.mapped_touch[slot].stroke_started = false;
+            state.mapped_touch[slot].stroke_release = false;
         }
     }
 }
@@ -467,8 +595,8 @@ void clear_mapped_touch(TouchState &state) {
     for (auto &point : state.mapped_touch) {
         point.active = false;
         point.pad_active = false;
-        point.swipe_started = false;
-        point.swipe_release = false;
+        point.stroke_started = false;
+        point.stroke_release = false;
     }
 }
 

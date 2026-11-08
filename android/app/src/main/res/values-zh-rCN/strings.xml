@@ -365,6 +365,19 @@
     <string name="settings_rear_touch_swipe_summary">L2/R2 让手指从背板顶部滑到底部，而不是一直按在原处，给只认滑动的手势游戏用。</string>
     <string name="settings_rear_touch_swipe_desc">有些游戏把背板当手势区而不是按钮：手指停在原地它根本不理，所以上面那个点按模式在它们里面没反应。打开这个以后，扣下扳机会让手指从背板顶部一路滑到底部，左右位置仍取 5 号／6 号点所在的地方。就算你中途松手，这一划也会自己走完，所以轻点一下扳机也算一次完整的滑动。如果游戏把背板当按钮用就关掉它，否则移动的手指可能变成滚动或转视角。</string>
     <string name="settings_rear_touch_note">5、6 号就是按键布局编辑里那两个虚线圆环；1-4 号仍作用于屏幕，继续跟随前触屏/后触屏开关。这个开关按游戏单独保存，存在该游戏的按键布局里。</string>
+    <string name="settings_tab_touch_gesture">触屏手势</string>
+    <string name="settings_touch_gesture_intro">选择按键按住某个映射点时，那根手指怎么动。点按是让手指停在原地，只有把屏幕当按钮的游戏吃这一套；滑动和擦拭会让手指真的走一段，这才是把屏幕当手势区的游戏在等的东西。</string>
+    <string name="settings_touch_gesture_point">%1$d 号点（%2$s）</string>
+    <string name="settings_touch_gesture_point_rear">%1$d 号点（%2$s · 背板）</string>
+    <string name="settings_touch_gesture_none">点按</string>
+    <string name="settings_touch_gesture_up">上滑</string>
+    <string name="settings_touch_gesture_down">下滑</string>
+    <string name="settings_touch_gesture_left">左滑</string>
+    <string name="settings_touch_gesture_right">右滑</string>
+    <string name="settings_touch_gesture_rub_h">横向擦</string>
+    <string name="settings_touch_gesture_rub_v">纵向擦</string>
+    <string name="settings_touch_gesture_desc">点按是把一根手指按在原处不动。滑动会让手指从这个点的一侧走到另一侧，然后停在那一头直到你松手；擦拭是来回蹭几下，最后回到起始位置。每一下都只要零点几秒，就算中途松开按键也会自己走完，所以轻点一下也算一次完整的手势。如果游戏的反应像是你在拖动画面，说明这个点设成了滑动、而它想要的是点按；如果完全没反应，那正好相反。所有点的位置都不会变：这里只改手指怎么动，不碰点放在哪。</string>
+    <string name="settings_touch_gesture_note">1、2 号点受按键页的 L3/R3 开关控制，5、6 号点受背触页的 L2/R2 开关控制，对应开关关掉时这里会灰掉。3、4 号点没有按键能触发，所以不列出来。和其它按键布局一起按游戏单独保存。5、6 号点这里留在「点按」、而背触页的滑动开关打开时，仍然是原来那个贯穿背板的整条下滑。</string>
 
     <!-- Settings - Cheats tab -->
     <string name="settings_cheats_title">金手指</string>

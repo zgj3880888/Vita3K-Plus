@@ -20,16 +20,42 @@ static constexpr int MAX_MAPPED_TOUCH = 8;
 // do, so the triggers stand in for the fingers nobody has there.
 static constexpr int MAPPED_TOUCH_REAR_FIRST = 4;
 
+// What the finger does while a pad button holds a mapping point down. A tap reports one finger
+// sitting still, which is all a game that uses the panel as a button ever asks for, and useless to
+// the far larger set of games that read the panel as a gesture: those compare where the finger was
+// with where it went, and a finger that never moves compares equal to itself forever.
+//
+// Everything here walks the finger along a stroke, and a stroke is just two ends plus how long it
+// takes, so the plain tap stays the default and needs no special case: with NONE no stroke starts.
+enum MappedTouchGesture : uint8_t {
+    TOUCH_GESTURE_NONE = 0, // stay put, the behaviour every earlier build had
+    TOUCH_GESTURE_UP,
+    TOUCH_GESTURE_DOWN,
+    TOUCH_GESTURE_LEFT,
+    TOUCH_GESTURE_RIGHT,
+    TOUCH_GESTURE_RUB_H, // back and forth across, for the wiping a game asks to be rubbed off
+    TOUCH_GESTURE_RUB_V,
+    TOUCH_GESTURE_COUNT
+};
+
 struct MappedTouch {
     bool active = false;
     bool pad_active = false; // held by a pad button rather than a finger on the overlay ring
     bool has_position = false; // the overlay told us where this point sits
-    // A rear point can be handed to the trigger as a swipe instead of a tap. A tap only ever reports
-    // one finger sitting still, which is fine for games that treat the back panel as a button and
-    // useless for the ones that read it as a gesture: those want to see the finger travel.
-    bool swipe_started = false; // the trigger is running a stroke instead of holding a spot
-    bool swipe_release = false; // released early; finish the stroke before lifting the finger
-    uint64_t swipe_start_us = 0;
+    // The stroke a pad button runs while it holds this point down. Set by the player per point; the
+    // rear panel switch below can still ask for a stroke of its own without touching the setting.
+    uint8_t gesture = TOUCH_GESTURE_NONE;
+    uint8_t stroke_gesture = TOUCH_GESTURE_NONE; // what this press is actually running
+    bool stroke_started = false; // the trigger is running a stroke instead of holding a spot
+    bool stroke_release = false; // released early; finish the stroke before lifting the finger
+    uint64_t stroke_start_us = 0;
+    uint64_t stroke_duration_us = 0;
+    // The two ends of the stroke, worked out once when the button goes down: interpolating between
+    // them is all the per-frame work there is, whichever curve the gesture uses.
+    float stroke_from_x = 0.f;
+    float stroke_from_y = 0.f;
+    float stroke_to_x = 0.f;
+    float stroke_to_y = 0.f;
     float x = 0.f; // normalized over the drawable area, same space as SDL finger events
     float y = 0.f;
     uint8_t id = 0; // touch id handed out when the point goes down
@@ -134,7 +160,12 @@ struct TouchState {
         pinch_modifier_enabled = false;
         pinch_velocity = 0.f;
         old_pinch_behavior = false;
-        std::fill_n(mapped_touch, MAX_MAPPED_TOUCH, MappedTouch{});
+        // What the player picked for each point outlives the restart; the rest of the point does not.
+        for (auto &point : mapped_touch) {
+            const uint8_t gesture = point.gesture;
+            point = MappedTouch{};
+            point.gesture = gesture;
+        }
         pinch_dist = initial_pinch_dist;
         pinch_speed = 40;
     }

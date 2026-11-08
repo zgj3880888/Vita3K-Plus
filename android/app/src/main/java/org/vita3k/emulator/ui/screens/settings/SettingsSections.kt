@@ -308,6 +308,11 @@ internal fun SettingsCategoryBody(
             onOverlayConfigChange = onOverlayConfigChange,
             onShowHelp = onShowHelp
         )
+        SettingsCategory.TouchGesture -> TouchGestureSettingsSection(
+            overlayConfig = overlayConfig,
+            onOverlayConfigChange = onOverlayConfigChange,
+            onShowHelp = onShowHelp
+        )
         SettingsCategory.Cheats -> CheatsSettingsSection(
             titleId = titleId,
             onShowHelp = onShowHelp
