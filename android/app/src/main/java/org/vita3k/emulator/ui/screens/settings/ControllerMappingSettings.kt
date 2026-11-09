@@ -260,6 +260,20 @@ internal fun ControllerMappingSections(
             onShowHelp = onShowHelp
         )
         SettingsToggleRow(
+            title = stringResource(R.string.settings_controls_stick_motion_balance),
+            checked = cfg.motionStickBalance,
+            onCheckedChange = { checked ->
+                onUpdate { motionStickBalance = checked }
+            },
+            enabled = cfg.motionStickSim && !cfg.disableMotion,
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_controls_stick_motion_balance),
+                body = stringResource(R.string.settings_controls_stick_motion_balance_desc),
+                scope = SettingsScope.Global
+            ),
+            onShowHelp = onShowHelp
+        )
+        SettingsToggleRow(
             title = stringResource(R.string.settings_controls_swap_triggers),
             checked = cfg.controllerSwapTriggers,
             onCheckedChange = { checked ->

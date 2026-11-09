@@ -40,7 +40,9 @@ void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, bool active
 // Runs the six-axis pose from the right stick for pads that have no sensors of their own, or for a
 // player who would rather aim with the stick than wave the pad about. Takes over from both the touch
 // panel tilt and the real sensors while enabled, and hands the pose back when switched off.
-void update_stick_motion(MotionState &state, bool enabled, float sensitivity, float x, float y);
+// balance_mode picks how the stick reads: turning the pose (aiming, stops dead on release) or
+// leaning it (balancing, eases back to level once released).
+void update_stick_motion(MotionState &state, bool enabled, bool balance_mode, float sensitivity, float x, float y);
 // A pad's own sensors, read through the Android input device instead of SDL. The platform hands out
 // a sensor manager per input device from API 31, which is the only way to see a Bluetooth pad's gyro
 // on Android: SDL's hidapi cannot reach it there. sensor_type is SDL_SENSOR_ACCEL or SDL_SENSOR_GYRO.

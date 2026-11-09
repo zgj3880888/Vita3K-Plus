@@ -43,6 +43,9 @@ class EmulatorConfig {
     // player who would rather tilt with the stick than wave the pad at the screen. Sensitivity
     // widens the tilt so a full lean arrives before the stick reaches its edge.
     @JvmField var motionStickSim: Boolean = false
+    // How the stick reads: off turns the pose (aiming, and letting go stops it dead), on leans it
+    // and lets a spring bring it back (balancing). The lean is the one that drifts on release.
+    @JvmField var motionStickBalance: Boolean = false
     @JvmField var motionStickSensitivity: Float = 1.0f
     @JvmField var controllerAnalogMultiplier: Float = 1.0f
     @JvmField var controllerSwapTriggers: Boolean = false
@@ -133,6 +136,7 @@ class EmulatorConfig {
         config.ngsEnable = ngsEnable
         config.disableMotion = disableMotion
         config.motionStickSim = motionStickSim
+        config.motionStickBalance = motionStickBalance
         config.motionStickSensitivity = motionStickSensitivity
         config.controllerAnalogMultiplier = controllerAnalogMultiplier
         config.controllerSwapTriggers = controllerSwapTriggers
@@ -217,6 +221,7 @@ class EmulatorConfig {
             ngsEnable == other.ngsEnable &&
             disableMotion == other.disableMotion &&
             motionStickSim == other.motionStickSim &&
+            motionStickBalance == other.motionStickBalance &&
             motionStickSensitivity == other.motionStickSensitivity &&
             controllerAnalogMultiplier == other.controllerAnalogMultiplier &&
             controllerSwapTriggers == other.controllerSwapTriggers &&
@@ -298,6 +303,7 @@ class EmulatorConfig {
         result = 31 * result + ngsEnable.hashCode()
         result = 31 * result + disableMotion.hashCode()
         result = 31 * result + motionStickSim.hashCode()
+        result = 31 * result + motionStickBalance.hashCode()
         result = 31 * result + motionStickSensitivity.hashCode()
         result = 31 * result + controllerAnalogMultiplier.hashCode()
         result = 31 * result + controllerSwapTriggers.hashCode()

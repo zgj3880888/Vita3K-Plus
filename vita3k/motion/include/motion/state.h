@@ -62,6 +62,10 @@ struct MotionState {
     // The right stick is standing in for the six-axis sensors. The pose is built by the same code as
     // the touch panel tilt, so this is what tells the touch tilt to keep its hands off while it runs.
     bool stick_motion = false;
+    // false: the stick turns the pose, which is what aiming wants. true: the stick leans it and the
+    // spring brings it back, which is what walking a wire wants. The two build the pose differently,
+    // so this is also what tells the code a switch between them has to start from level.
+    bool stick_balance_mode = false;
     // Set as soon as a pad reports a sensor sample. The device sensors write the same pose, and a
     // tablet lying still on a table would otherwise overwrite every sample the pad sends.
     bool gamepad_motion_seen = false;

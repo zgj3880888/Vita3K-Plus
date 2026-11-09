@@ -661,7 +661,9 @@
     <string name="settings_controls_disable_motion">禁用体感控制</string>
     <string name="settings_controls_disable_motion_desc">忽略手柄与设备的运动传感器，适用于需要陀螺仪或加速度计输入的游戏。</string>
     <string name="settings_controls_stick_motion">用右摇杆模拟体感</string>
-    <string name="settings_controls_stick_motion_desc">需要陀螺仪的段落——走钢丝、平衡木、靠倾斜机身瞄准——改由右摇杆给出姿态。往想倾斜的方向推，它就稳住那个角度；松手后视角缓缓回正。任何手柄都能用，包括本身没有六轴的。打开期间由摇杆接管姿态，手柄上的真实陀螺仪和平板的传感器都不再参与。</string>
+    <string name="settings_controls_stick_motion_desc">需要陀螺仪的段落——走钢丝、平衡木、靠倾斜机身瞄准——改由右摇杆给出姿态。默认是转向：推着摇杆，视角就朝那个方向一直转，松手立刻停住，不留尾巴，适合射击瞄准。要读倾角的段落请打开下面的平衡模式。任何手柄都能用，包括本身没有六轴的。打开期间由摇杆接管姿态，手柄上的真实陀螺仪和平板的传感器都不再参与。</string>
+    <string name="settings_controls_stick_motion_balance">平衡模式（走钢丝 / 平衡木）</string>
+    <string name="settings_controls_stick_motion_balance_desc">关闭时右摇杆是转向：推着它视角持续朝那个方向转，松手停在原处，不漂移。打开后右摇杆改成倾斜：往哪推就稳住哪个角度，松手后姿态自己缓缓回正。走钢丝、平衡木这类按倾角判定的段落用这个；但回正那一下会被游戏读成一次转动，拿它瞄准会多走一段。</string>
     <string name="settings_controls_stick_motion_sensitivity">右摇杆体感灵敏度</string>
     <string name="settings_controls_stick_motion_sensitivity_value">%1$d%%</string>
     <string name="settings_controls_stick_motion_sensitivity_desc">推多远算满倾。高于 100%% 时轻轻一推就到摇杆推到边缘的角度，适合瞄准；低于 100%% 留出更多微调余量，适合平衡类段落。</string>

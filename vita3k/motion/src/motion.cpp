@@ -142,6 +142,7 @@ void MotionState::reset_runtime() {
     stop_sensor_sampling();
     synthetic_tilt = false;
     stick_motion = false;
+    stick_balance_mode = false;
     gamepad_motion_seen = false;
     // has_gamepad_motion_support is left alone: whether the pad has sensors is a fact about the
     // hardware, not about this session, and a game that asks before the first sample arrives still
@@ -452,7 +453,56 @@ void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, const bool 
     apply_synthetic_pose(state, active, x, y, 1.0f, 1.0f);
 }
 
-void update_stick_motion(MotionState &state, const bool enabled, const float sensitivity, const float x, const float y) {
+// Aiming mode: the stick does not lean the pose, it turns it. What the pose holds is the turning
+// added up, so letting go stops it where it is. The other reading of the stick - lean towards the
+// way you push, spring back when you let go - is what a balancing section wants, but that spring is
+// a move of its own: the view kept turning for as long as the pose took to come back, which is the
+// drift that showed up the moment anyone aimed with it.
+static void apply_stick_turn(MotionState &state, const float sensitivity, const float x, const float y) {
+    // radians per second at full deflection and 1.0 sensitivity, with a deadzone wide enough that a
+    // resting stick with a little play in it does not slowly turn the view all session long
+    constexpr float max_rate = 2.5f;
+    constexpr float deadzone = 0.10f;
+
+    const float turn_x = std::fabs(x) > deadzone ? x : 0.0f;
+    const float turn_y = std::fabs(y) > deadzone ? y : 0.0f;
+
+    const uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    const std::lock_guard<std::mutex> guard(state.mutex);
+    float dt = 1.0f / 60.0f;
+    if (!state.synthetic_tilt) {
+        state.synthetic_tilt = true;
+        state.synthetic_rotation = {};
+        state.synthetic_rotation_rate = {};
+        state.synthetic_turn = 0.0f;
+        state.synthetic_turn_rate = 0.0f;
+    } else if (now > state.synthetic_timestamp) {
+        dt = std::min(static_cast<float>(now - state.synthetic_timestamp) / 1000000.0f, 0.1f);
+    }
+    state.synthetic_timestamp = now;
+
+    const auto previous = pose_quaternion(state.synthetic_rotation, state.synthetic_turn);
+
+    const float yaw_rate = -turn_x * max_rate * sensitivity;
+    const float pitch_rate = turn_y * max_rate * sensitivity;
+    state.synthetic_turn = std::remainder(state.synthetic_turn + yaw_rate * dt, 2.0f * std::numbers::pi_v<float>);
+    // kept short of a right angle, where the orientation stops saying which way is up
+    state.synthetic_rotation.x = std::clamp(state.synthetic_rotation.x + pitch_rate * dt, -1.4f, 1.4f);
+
+    const auto current = pose_quaternion(state.synthetic_rotation, state.synthetic_turn);
+
+    auto step = previous.Inverse() * current;
+    if (step.w < 0.0f)
+        step = { -step.xyz, -step.w };
+    const float half_sine = step.xyz.Length();
+    state.synthetic_gyro = half_sine > 0.0f ? step.xyz * (2.0f * std::atan2(half_sine, step.w) / half_sine / dt) : Util::Vec3f{};
+
+    state.motion_data.SetAcceleration(Util::QuaternionRotate(current.Inverse(), Util::Vec3f{ 0.0f, 0.0f, -1.0f }));
+    state.last_updated_accel_timestamp = now;
+}
+
+void update_stick_motion(MotionState &state, const bool enabled, const bool balance_mode, const float sensitivity, const float x, const float y) {
     // Sampling stops whenever no game holds the sensors open, and a simulation that kept running
     // would leave a pose behind for the next game to find. Give the pose back when it does.
     if (!enabled || !state.is_sampling) {
@@ -475,12 +525,24 @@ void update_stick_motion(MotionState &state, const bool enabled, const float sen
 
     if (!state.stick_motion) {
         state.stick_motion = true;
-        LOG_INFO("[MOTION] the right stick is standing in for the six-axis sensors (sensitivity {:.2f})", sensitivity);
+        LOG_INFO("[MOTION] the right stick is standing in for the six-axis sensors ({} mode, sensitivity {:.2f})",
+            balance_mode ? "balance" : "aim", sensitivity);
     }
-    // Always active, a centred stick included: the pose is meant to ease back to level on its own,
-    // and stopping the simulation on a centred stick would hand the pose to sensors the pad may not
-    // even have, which is the very thing this mode exists to avoid.
-    apply_synthetic_pose(state, true, x, y, sensitivity, 0.0f);
+
+    // The two modes build the pose in different ways, so a switch between them starts from level
+    // rather than from whatever the other one had accumulated.
+    if (state.stick_balance_mode != balance_mode) {
+        state.stick_balance_mode = balance_mode;
+        const std::lock_guard<std::mutex> guard(state.mutex);
+        state.synthetic_tilt = false;
+    }
+
+    // Always active, a centred stick included: stopping on a centred stick would hand the pose back
+    // to sensors the pad may not even have, which is the very thing this mode exists to avoid.
+    if (balance_mode)
+        apply_synthetic_pose(state, true, x, y, sensitivity, 0.0f);
+    else
+        apply_stick_turn(state, sensitivity, x, y);
 }
 
 void refresh_motion(MotionState &state, CtrlState &ctrl_state) {

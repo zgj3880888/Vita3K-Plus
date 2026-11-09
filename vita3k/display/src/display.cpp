@@ -180,6 +180,7 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
             // The stick simulation runs here rather than in the pad read so that it keeps its pace
             // with the vblank, which is what the pose and the timestamps it records are built on.
             update_stick_motion(emuenv.motion, emuenv.cfg.motion_stick_sim && !emuenv.cfg.disable_motion,
+                emuenv.cfg.motion_stick_balance,
                 emuenv.cfg.motion_stick_sensitivity,
                 emuenv.ctrl.motion_stick_x.load(std::memory_order_relaxed),
                 emuenv.ctrl.motion_stick_y.load(std::memory_order_relaxed));

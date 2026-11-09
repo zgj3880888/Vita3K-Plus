@@ -121,6 +121,7 @@ internal fun rememberSettingsSearchEntries(
         add(entry(SettingsCategory.Controls, R.string.settings_controls_disable_motion, R.string.settings_controls_disable_motion_desc, scope = SettingsScope.Global, keywords = "gyro accelerometer motion controls"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_stick_motion, R.string.settings_controls_stick_motion_desc, scope = SettingsScope.Global, keywords = "gyro accelerometer motion tilt stick simulate balance beam wire aim 体感 陀螺仪 平衡 走钢丝 瞄准 摇杆"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_stick_motion_sensitivity, R.string.settings_controls_stick_motion_sensitivity_desc, scope = SettingsScope.Global, keywords = "gyro motion tilt sensitivity stick 体感 灵敏度"))
+        add(entry(SettingsCategory.Controls, R.string.settings_controls_stick_motion_balance, R.string.settings_controls_stick_motion_balance_desc, scope = SettingsScope.Global, keywords = "gyro motion balance tilt lean beam wire walk 体感 平衡 倾斜 走钢丝 平衡木"))
         add(entry(SettingsCategory.Controls, R.string.settings_controls_swap_triggers, R.string.settings_controls_swap_triggers_desc, scope = SettingsScope.Global, keywords = "l1 r1 l2 r2 triggers shoulders bumpers swap remap racing"))
         add(entry(SettingsCategory.Network, R.string.settings_network_psn_signed_in, R.string.settings_network_psn_signed_in_desc, scope = SettingsScope.PerApp))
         if (!isPerApp) {

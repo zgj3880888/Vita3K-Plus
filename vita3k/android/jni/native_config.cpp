@@ -67,6 +67,7 @@ struct EmulatorConfigFields {
     jfieldID ngsEnable = nullptr;
     jfieldID disableMotion = nullptr;
     jfieldID motionStickSim = nullptr;
+    jfieldID motionStickBalance = nullptr;
     jfieldID motionStickSensitivity = nullptr;
     jfieldID controllerAnalogMultiplier = nullptr;
     jfieldID controllerSwapTriggers = nullptr;
@@ -157,6 +158,7 @@ EmulatorConfigFields resolve_config_fields(JNIEnv *env) {
     fields.ngsEnable = env->GetFieldID(fields.cls, "ngsEnable", "Z");
     fields.disableMotion = env->GetFieldID(fields.cls, "disableMotion", "Z");
     fields.motionStickSim = env->GetFieldID(fields.cls, "motionStickSim", "Z");
+    fields.motionStickBalance = env->GetFieldID(fields.cls, "motionStickBalance", "Z");
     fields.motionStickSensitivity = env->GetFieldID(fields.cls, "motionStickSensitivity", "F");
     fields.controllerAnalogMultiplier = env->GetFieldID(fields.cls, "controllerAnalogMultiplier", "F");
     fields.controllerSwapTriggers = env->GetFieldID(fields.cls, "controllerSwapTriggers", "Z");
@@ -350,6 +352,7 @@ void fill_config_object(JNIEnv *env, jobject obj, const EmulatorConfigFields &fi
     env->SetBooleanField(obj, fields.ngsEnable, current_config.ngs_enable);
     env->SetBooleanField(obj, fields.disableMotion, config.disable_motion);
     env->SetBooleanField(obj, fields.motionStickSim, config.motion_stick_sim);
+    env->SetBooleanField(obj, fields.motionStickBalance, config.motion_stick_balance);
     env->SetFloatField(obj, fields.motionStickSensitivity, config.motion_stick_sensitivity);
     env->SetFloatField(obj, fields.controllerAnalogMultiplier, config.controller_analog_multiplier);
     env->SetBooleanField(obj, fields.controllerSwapTriggers, config.controller_swap_triggers);
@@ -501,6 +504,7 @@ void read_config_object(JNIEnv *env, jobject obj, const EmulatorConfigFields &fi
     current_config.ngs_enable = env->GetBooleanField(obj, fields.ngsEnable) != JNI_FALSE;
     config.disable_motion = env->GetBooleanField(obj, fields.disableMotion) != JNI_FALSE;
     config.motion_stick_sim = env->GetBooleanField(obj, fields.motionStickSim) != JNI_FALSE;
+    config.motion_stick_balance = env->GetBooleanField(obj, fields.motionStickBalance) != JNI_FALSE;
     config.motion_stick_sensitivity = env->GetFloatField(obj, fields.motionStickSensitivity);
     config.controller_analog_multiplier = env->GetFloatField(obj, fields.controllerAnalogMultiplier);
     config.controller_swap_triggers = env->GetBooleanField(obj, fields.controllerSwapTriggers) != JNI_FALSE;
