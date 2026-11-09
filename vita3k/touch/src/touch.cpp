@@ -535,9 +535,13 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
     }
 
     // Pressed again while a release was still finishing its stroke: carry on from there instead of
-    // restarting, so a player tapping in rhythm does not cut the stroke short every time.
-    if (point.stroke_started)
+    // restarting, so a player tapping in rhythm does not cut the stroke short every time. Clearing
+    // the pending release is what makes the stroke keep its finger down while the button stays
+    // pressed, instead of lifting the moment the stroke runs out and starting a second one.
+    if (point.stroke_started) {
+        point.stroke_release = false;
         return 0;
+    }
 
     // Without a reported position the point has nowhere to go, and the overlay is the only thing
     // that knows where the player put it. It reports on every layout, but this guard has been the
