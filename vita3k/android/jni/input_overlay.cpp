@@ -221,7 +221,7 @@ Java_org_vita3k_emulator_overlay_GamepadMotion_pushSample(JNIEnv *env, jobject t
     if (!emuenv)
         return;
 
-    set_android_gamepad_motion(emuenv->motion, emuenv->cfg.motion_stick_sim, static_cast<int>(type), x, y, z, static_cast<uint64_t>(timestamp_ns));
+    set_android_gamepad_motion(emuenv->motion, static_cast<int>(type), x, y, z, static_cast<uint64_t>(timestamp_ns));
 }
 
 } // extern "C"

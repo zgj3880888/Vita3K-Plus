@@ -178,6 +178,13 @@ static Util::Quaternion<SceFloat> synthetic_orientation(const MotionState &state
     return Util::MakeQuaternion({ 0.0f, 0.0f, 1.0f }, state.synthetic_yaw) * pose_quaternion(state.synthetic_rotation, state.synthetic_turn);
 }
 
+// A pad reporting its own sensors owns the gravity half of the pose: it measured the real one, and
+// the stick must not write over it with an invented one. With no such pad the stick has to make the
+// whole pose up on its own, gravity included, which is what a balancing section reads.
+static bool pad_is_reporting(const MotionState &state) {
+    return state.gamepad_motion_seen;
+}
+
 SceFVector3 get_acceleration(const MotionState &state) {
     Util::Vec3f accelerometer = state.motion_data.GetAcceleration();
     return {
@@ -188,8 +195,16 @@ SceFVector3 get_acceleration(const MotionState &state) {
 }
 
 SceFVector3 get_gyroscope(const MotionState &state) {
-    if (state.synthetic_tilt)
-        return { state.synthetic_gyro.x, state.synthetic_gyro.y, state.synthetic_gyro.z };
+    if (state.synthetic_tilt) {
+        const Util::Vec3f stick = state.synthetic_gyro;
+        if (!pad_is_reporting(state))
+            return { stick.x, stick.y, stick.z };
+
+        // Both are turning the same pad: the game should see one rate, not whichever of the two
+        // wrote last.
+        const Util::Vec3f pad = state.motion_data.GetGyroscope() * 2.f * std::numbers::pi_v<float>;
+        return { pad.x + stick.x, pad.y + stick.y, pad.z + stick.z };
+    }
 
     Util::Vec3f gyroscope = state.motion_data.GetGyroscope() * 2.f * std::numbers::pi_v<float>;
     return {
@@ -200,7 +215,10 @@ SceFVector3 get_gyroscope(const MotionState &state) {
 }
 
 Util::Quaternion<SceFloat> get_orientation(const MotionState &state) {
-    if (state.synthetic_tilt)
+    // With a pad reporting, the pose is the pad's own: it is the one really being held at an angle,
+    // and mixing an invented pose into it would tilt a wire the player is standing straight on. The
+    // stick still gets its say through the rate, further up.
+    if (state.synthetic_tilt && !pad_is_reporting(state))
         return synthetic_orientation(state);
 
     auto quat = state.motion_data.GetOrientation();
@@ -255,18 +273,21 @@ static void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const 
     if (!emuenv.motion.is_sampling)
         return;
 
-    // The stick is standing in for the sensors, so a sample from either one would be a second writer
-    // of the pose it is already holding.
-    if (emuenv.cfg.motion_stick_sim)
+    const bool from_gamepad = sensor.type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
+
+    // The stick stands in for a device that has no sensors of its own, so its samples would be a
+    // second writer of the pose it holds. A pad is a different matter: its sensors are exactly what
+    // a wiring or balancing section wants, and the stick is busy turning the view, so the two work
+    // together instead of one displacing the other.
+    if (emuenv.cfg.motion_stick_sim && !from_gamepad)
         return;
 
-    if (!emuenv.ctrl.has_motion_support && !emuenv.motion.has_device_motion_support)
+    if (!emuenv.ctrl.has_motion_support && !emuenv.motion.has_device_motion_support && !from_gamepad)
         return;
 
     // A pad and the device both write the same pose, and the device keeps reporting even when it is
     // lying still on a table, so its zeros would overwrite every sample the pad sends. Once a pad has
     // reported, it owns the pose: it is the one the player is actually turning.
-    const bool from_gamepad = sensor.type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
     if (from_gamepad) {
         if (!emuenv.motion.gamepad_motion_seen)
             LOG_INFO("[MOTION] the pad is reporting its own sensors, so its samples drive the pose from here on");
@@ -322,8 +343,8 @@ void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_Gam
     handle_motion_event<SDL_GamepadSensorEvent>(emuenv, sensor_type, sensor);
 }
 
-void set_android_gamepad_motion(MotionState &state, const bool stick_sim, const int sensor_type, const float x, const float y, const float z, const uint64_t timestamp_ns) {
-    if (!state.is_sampling || stick_sim)
+void set_android_gamepad_motion(MotionState &state, const int sensor_type, const float x, const float y, const float z, const uint64_t timestamp_ns) {
+    if (!state.is_sampling)
         return;
 
     // Android hands out a pad's own sensors in the pad's own frame: +x to its right, +y towards its
@@ -350,7 +371,7 @@ void set_android_gamepad_motion(MotionState &state, const bool stick_sim, const 
     // it lies still, and those would overwrite these one for one.
     if (!state.gamepad_motion_seen) {
         state.gamepad_motion_seen = true;
-        LOG_INFO("[MOTION] the pad's own sensors are reporting, so its samples drive the pose from here on");
+        LOG_INFO("[MOTION] the pad's own sensors are reporting: the pose leans with the pad, and the stick keeps turning the view");
     }
     state.has_gamepad_motion_support = true;
 }
@@ -422,8 +443,12 @@ static void apply_synthetic_pose(MotionState &state, const bool active, const fl
     const float half_sine = step.xyz.Length();
     state.synthetic_gyro = half_sine > 0.0f ? step.xyz * (2.0f * std::atan2(half_sine, step.w) / half_sine / dt) : Util::Vec3f{};
 
-    state.motion_data.SetAcceleration(Util::QuaternionRotate(current.Inverse(), Util::Vec3f{ 0.0f, 0.0f, -1.0f }));
-    state.last_updated_accel_timestamp = now;
+    // Only when the pose is entirely this code's own: a pad that reports has a real gravity reading,
+    // and writing an invented one over it would put the lean a balancing section reads out of joint.
+    if (!pad_is_reporting(state)) {
+        state.motion_data.SetAcceleration(Util::QuaternionRotate(current.Inverse(), Util::Vec3f{ 0.0f, 0.0f, -1.0f }));
+        state.last_updated_accel_timestamp = now;
+    }
 }
 
 void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, const bool active, const float x, const float y) {
@@ -453,11 +478,13 @@ void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, const bool 
     apply_synthetic_pose(state, active, x, y, 1.0f, 1.0f);
 }
 
-// Aiming mode: the stick does not lean the pose, it turns it. What the pose holds is the turning
-// added up, so letting go stops it where it is. The other reading of the stick - lean towards the
-// way you push, spring back when you let go - is what a balancing section wants, but that spring is
-// a move of its own: the view kept turning for as long as the pose took to come back, which is the
-// drift that showed up the moment anyone aimed with it.
+// Aiming mode. Releasing the stick has to stop the view dead, so what the stick reports is a rate
+// and not an angle: nothing pulls the pose back to level, so there is no return journey for the game
+// to read as more turning. That return journey is exactly what made aiming drift on after release.
+//
+// The axis order is the one the pad's own samples arrive in, after the swap applied in
+// set_android_gamepad_motion: x turns the view up and down, z turns it left and right. Writing the
+// rate in that order is what lets it be added to a pad's own rate and mean the same thing.
 static void apply_stick_turn(MotionState &state, const float sensitivity, const float x, const float y) {
     // radians per second at full deflection and 1.0 sensitivity, with a deadzone wide enough that a
     // resting stick with a little play in it does not slowly turn the view all session long
@@ -467,37 +494,40 @@ static void apply_stick_turn(MotionState &state, const float sensitivity, const 
     const float turn_x = std::fabs(x) > deadzone ? x : 0.0f;
     const float turn_y = std::fabs(y) > deadzone ? y : 0.0f;
 
-    const uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    const float yaw_rate = -turn_x * max_rate * sensitivity;
+    const float pitch_rate = turn_y * max_rate * sensitivity;
 
     const std::lock_guard<std::mutex> guard(state.mutex);
-    float dt = 1.0f / 60.0f;
     if (!state.synthetic_tilt) {
         state.synthetic_tilt = true;
         state.synthetic_rotation = {};
         state.synthetic_rotation_rate = {};
         state.synthetic_turn = 0.0f;
         state.synthetic_turn_rate = 0.0f;
-    } else if (now > state.synthetic_timestamp) {
-        dt = std::min(static_cast<float>(now - state.synthetic_timestamp) / 1000000.0f, 0.1f);
     }
+    state.synthetic_gyro = { pitch_rate, 0.0f, yaw_rate };
+
+    // A pad with sensors of its own already holds the pose and the gravity the game reads; all this
+    // adds is the rate the stick is asking for, which is summed in on the way out.
+    if (pad_is_reporting(state)) {
+        state.synthetic_rotation = {};
+        state.synthetic_turn = 0.0f;
+        return;
+    }
+
+    // No pad behind it, so the stick has to carry the pose as well as the rate: turn it, and let the
+    // gravity the game reads follow the turning.
+    const uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    float dt = 1.0f / 60.0f;
+    if (now > state.synthetic_timestamp)
+        dt = std::min(static_cast<float>(now - state.synthetic_timestamp) / 1000000.0f, 0.1f);
     state.synthetic_timestamp = now;
 
-    const auto previous = pose_quaternion(state.synthetic_rotation, state.synthetic_turn);
-
-    const float yaw_rate = -turn_x * max_rate * sensitivity;
-    const float pitch_rate = turn_y * max_rate * sensitivity;
     state.synthetic_turn = std::remainder(state.synthetic_turn + yaw_rate * dt, 2.0f * std::numbers::pi_v<float>);
     // kept short of a right angle, where the orientation stops saying which way is up
     state.synthetic_rotation.x = std::clamp(state.synthetic_rotation.x + pitch_rate * dt, -1.4f, 1.4f);
 
     const auto current = pose_quaternion(state.synthetic_rotation, state.synthetic_turn);
-
-    auto step = previous.Inverse() * current;
-    if (step.w < 0.0f)
-        step = { -step.xyz, -step.w };
-    const float half_sine = step.xyz.Length();
-    state.synthetic_gyro = half_sine > 0.0f ? step.xyz * (2.0f * std::atan2(half_sine, step.w) / half_sine / dt) : Util::Vec3f{};
-
     state.motion_data.SetAcceleration(Util::QuaternionRotate(current.Inverse(), Util::Vec3f{ 0.0f, 0.0f, -1.0f }));
     state.last_updated_accel_timestamp = now;
 }
@@ -523,23 +553,27 @@ void update_stick_motion(MotionState &state, const bool enabled, const bool bala
         return;
     }
 
+    // The two modes build the pose in different ways, so a switch between them starts from level
+    // rather than from whatever the other one had accumulated. A pad with sensors of its own leans
+    // for real, so the stick is left to turn the view whatever the balance switch says - that is
+    // what lets a wire be walked by waving the pad and a shot aimed by pushing the stick, at once.
+    const bool lean = balance_mode && !pad_is_reporting(state);
+
     if (!state.stick_motion) {
         state.stick_motion = true;
         LOG_INFO("[MOTION] the right stick is standing in for the six-axis sensors ({} mode, sensitivity {:.2f})",
-            balance_mode ? "balance" : "aim", sensitivity);
+            lean ? "balance" : "aim", sensitivity);
     }
 
-    // The two modes build the pose in different ways, so a switch between them starts from level
-    // rather than from whatever the other one had accumulated.
-    if (state.stick_balance_mode != balance_mode) {
-        state.stick_balance_mode = balance_mode;
+    if (state.stick_balance_mode != lean) {
+        state.stick_balance_mode = lean;
         const std::lock_guard<std::mutex> guard(state.mutex);
         state.synthetic_tilt = false;
     }
 
     // Always active, a centred stick included: stopping on a centred stick would hand the pose back
     // to sensors the pad may not even have, which is the very thing this mode exists to avoid.
-    if (balance_mode)
+    if (lean)
         apply_synthetic_pose(state, true, x, y, sensitivity, 0.0f);
     else
         apply_stick_turn(state, sensitivity, x, y);
@@ -549,7 +583,10 @@ void refresh_motion(MotionState &state, CtrlState &ctrl_state) {
     if (!state.is_sampling)
         return;
 
-    if (state.synthetic_tilt) {
+    // With only the stick behind the pose there is no sensor to integrate: the pose was built whole
+    // by the code above. With a pad reporting, that path has to keep running underneath, because the
+    // lean the stick is not allowed to invent comes from there.
+    if (state.synthetic_tilt && !pad_is_reporting(state)) {
         state.motion_data.UpdateBasicOrientation();
         state.last_accel_timestamp = state.last_updated_accel_timestamp;
         state.last_counter++;

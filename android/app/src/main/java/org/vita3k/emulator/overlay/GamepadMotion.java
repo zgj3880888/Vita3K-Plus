@@ -130,13 +130,22 @@ public final class GamepadMotion implements SensorEventListener {
       return;
 
     final SensorManager manager = device.getSensorManager();
-    if (manager == null)
+    if (manager == null) {
+      Log.w(TAG, "'" + device.getName() + "' is a pad but has no sensor manager; nothing to read");
       return;
+    }
 
-    final Sensor gyro = manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
-    final Sensor accel = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-    if (gyro == null && accel == null)
+    // some pads only publish the uncalibrated variants, which carry the same three values first
+    Sensor gyro = manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
+    if (gyro == null)
+      gyro = manager.getDefaultSensor(Sensor.TYPE_GYROSCOPE_UNCALIBRATED);
+    Sensor accel = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+    if (accel == null)
+      accel = manager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER_UNCALIBRATED);
+    if (gyro == null && accel == null) {
+      Log.i(TAG, "'" + device.getName() + "' reports no gyroscope and no accelerometer of its own");
       return;
+    }
 
     mRegistrations.put(deviceId, new Registration(manager, gyro, accel));
     if (gyro != null)
@@ -160,9 +169,9 @@ public final class GamepadMotion implements SensorEventListener {
   @Override
   public void onSensorChanged(SensorEvent event) {
     final int type = event.sensor.getType();
-    if (type == Sensor.TYPE_GYROSCOPE)
+    if (type == Sensor.TYPE_GYROSCOPE || type == Sensor.TYPE_GYROSCOPE_UNCALIBRATED)
       pushSample(SENSOR_GYRO, event.values[0], event.values[1], event.values[2], event.timestamp);
-    else if (type == Sensor.TYPE_ACCELEROMETER)
+    else if (type == Sensor.TYPE_ACCELEROMETER || type == Sensor.TYPE_ACCELEROMETER_UNCALIBRATED)
       pushSample(SENSOR_ACCEL, event.values[0], event.values[1], event.values[2], event.timestamp);
   }
 

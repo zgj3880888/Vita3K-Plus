@@ -46,5 +46,5 @@ void update_stick_motion(MotionState &state, bool enabled, bool balance_mode, fl
 // A pad's own sensors, read through the Android input device instead of SDL. The platform hands out
 // a sensor manager per input device from API 31, which is the only way to see a Bluetooth pad's gyro
 // on Android: SDL's hidapi cannot reach it there. sensor_type is SDL_SENSOR_ACCEL or SDL_SENSOR_GYRO.
-void set_android_gamepad_motion(MotionState &state, bool stick_sim, int sensor_type, float x, float y, float z, uint64_t timestamp_ns);
+void set_android_gamepad_motion(MotionState &state, int sensor_type, float x, float y, float z, uint64_t timestamp_ns);
 void refresh_motion(MotionState &state, CtrlState &ctrl_state);
