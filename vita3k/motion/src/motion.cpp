@@ -347,10 +347,12 @@ void set_android_gamepad_motion(MotionState &state, const int sensor_type, const
     if (!state.is_sampling)
         return;
 
-    // Android hands out a pad's own sensors in the pad's own frame: +x to its right, +y towards its
-    // top, +z out of its face. This is the mapping the pad branch above uses for what SDL delivers,
-    // so a pad read this way ends up in the same place as one SDL could see for itself.
-    const Util::Vec3f data = { x, -z, y };
+    // An Android sensor speaks the same axes a Vita does - +x to the right, +y up, +z out of the
+    // face - which is why the device's own sensors are stored untransformed above. A pad read
+    // through its own sensor manager comes in on those same axes, so it goes in as it arrives; the
+    // swap the SDL branch applies belongs to the frame SDL reports a pad's sensors in, not to this
+    // one, and reusing it here would trade the lean for a roll.
+    const Util::Vec3f data = { x, y, z };
     const uint64_t timestamp_us = (timestamp_ns > 0)
         ? timestamp_ns / 1000
         : std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
