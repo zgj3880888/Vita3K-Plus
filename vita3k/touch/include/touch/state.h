@@ -39,6 +39,14 @@ enum MappedTouchGesture : uint8_t {
     // the button. Holding the button down afterwards does not keep the finger there. This is what
     // a menu entry or an on-screen prompt wants, and it is the one thing a held-down tap cannot do.
     TOUCH_GESTURE_CLICK,
+    // Corner to corner. Plenty of games ask for a finger dragged at an angle rather than straight
+    // across, and a straight stroke is not a diagonal one however the player sets the point: the
+    // game compares the direction of the travel, so the whole length of the stroke has to be at that
+    // angle. Named after where the finger is heading, like the four straight ones above.
+    TOUCH_GESTURE_UP_LEFT,
+    TOUCH_GESTURE_UP_RIGHT,
+    TOUCH_GESTURE_DOWN_LEFT,
+    TOUCH_GESTURE_DOWN_RIGHT,
     TOUCH_GESTURE_COUNT
 };
 

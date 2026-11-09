@@ -37,7 +37,12 @@ internal fun TouchGestureSettingsSection(
         stringResource(R.string.settings_touch_gesture_right),
         stringResource(R.string.settings_touch_gesture_rub_h),
         stringResource(R.string.settings_touch_gesture_rub_v),
-        stringResource(R.string.settings_touch_gesture_click)
+        stringResource(R.string.settings_touch_gesture_click),
+        // the four corners, in the order of the TouchGesture values
+        stringResource(R.string.settings_touch_gesture_up_left),
+        stringResource(R.string.settings_touch_gesture_up_right),
+        stringResource(R.string.settings_touch_gesture_down_left),
+        stringResource(R.string.settings_touch_gesture_down_right)
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

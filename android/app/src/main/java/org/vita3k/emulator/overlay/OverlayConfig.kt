@@ -21,8 +21,14 @@ object TouchGesture {
     // a real click: the finger lands, waits a moment and lifts again on its own. What a menu entry or
     // an on-screen prompt wants, and the one thing holding the button down cannot produce.
     const val CLICK = 7
+    // corner to corner, named after where the finger ends up. A game that reads the heading of the
+    // drag needs the whole stroke at that angle, which no straight swipe can give it.
+    const val UP_LEFT = 8
+    const val UP_RIGHT = 9
+    const val DOWN_LEFT = 10
+    const val DOWN_RIGHT = 11
 
-    val ALL = listOf(NONE, UP, DOWN, LEFT, RIGHT, RUB_H, RUB_V, CLICK)
+    val ALL = listOf(NONE, UP, DOWN, LEFT, RIGHT, RUB_H, RUB_V, CLICK, UP_LEFT, UP_RIGHT, DOWN_LEFT, DOWN_RIGHT)
 
     fun sanitize(gesture: Int): Int = if (gesture in ALL) gesture else NONE
 

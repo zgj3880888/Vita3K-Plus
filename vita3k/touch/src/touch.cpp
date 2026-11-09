@@ -76,6 +76,13 @@ constexpr float TWO_PI = 6.28318530718f;
 // afterwards instead of waiting for the button, which is what a menu entry wants.
 constexpr uint64_t CLICK_US = 90000;
 
+// A diagonal moves the same share of the panel across and down, which is what reads as a diagonal
+// on a panel wider than it is tall; the share is trimmed so both ends together still cover about
+// the same distance as the straight swipe above, instead of the longer run two full offsets would
+// cover. Games that ask for one are reading the heading of the finger, so that it is clearly
+// neither horizontal nor vertical matters more than the exact angle.
+constexpr float DIAGONAL_SHARE = 0.70710678f;
+
 static uint64_t touch_now_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -413,6 +420,7 @@ static void begin_stroke(MappedTouch &point, const bool rear_swipe) {
         return;
 
     const float half = SWIPE_SPAN * 0.5f;
+    const float diag = half * DIAGONAL_SHARE;
     const float rub_half = RUB_SPAN * 0.5f;
     float from_x = point.x;
     float from_y = point.y;
@@ -459,6 +467,33 @@ static void begin_stroke(MappedTouch &point, const bool rear_swipe) {
         // A click does not travel: the finger lands on the point and lifts again after a moment,
         // which is the whole of what an on-screen button wants.
         duration = CLICK_US;
+        break;
+    // The four corners, read as where the finger ends up. Each one starts on the opposite side of
+    // the point so the point itself is crossed halfway through, and both axes move together so the
+    // heading stays put for the whole travel instead of curving towards the corner at the end.
+    case TOUCH_GESTURE_UP_LEFT:
+        from_x = point.x + diag;
+        from_y = point.y + diag;
+        to_x = point.x - diag;
+        to_y = point.y - diag;
+        break;
+    case TOUCH_GESTURE_UP_RIGHT:
+        from_x = point.x - diag;
+        from_y = point.y + diag;
+        to_x = point.x + diag;
+        to_y = point.y - diag;
+        break;
+    case TOUCH_GESTURE_DOWN_LEFT:
+        from_x = point.x + diag;
+        from_y = point.y - diag;
+        to_x = point.x - diag;
+        to_y = point.y + diag;
+        break;
+    case TOUCH_GESTURE_DOWN_RIGHT:
+        from_x = point.x - diag;
+        from_y = point.y - diag;
+        to_x = point.x + diag;
+        to_y = point.y + diag;
         break;
     default:
         return;
