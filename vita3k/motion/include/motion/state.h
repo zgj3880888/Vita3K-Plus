@@ -53,6 +53,10 @@ struct MotionState {
     uint64_t last_updated_accel_timestamp = 0;
 
     bool has_device_motion_support = false;
+    // A pad whose sensors are read through the Android input device rather than SDL. That is the
+    // only way to reach a Bluetooth pad's gyro on Android, and SDL never reports it, so the game has
+    // to be told separately that the pose is real.
+    bool has_gamepad_motion_support = false;
     bool is_sampling = false;
     bool synthetic_tilt = false;
     // The right stick is standing in for the six-axis sensors. The pose is built by the same code as

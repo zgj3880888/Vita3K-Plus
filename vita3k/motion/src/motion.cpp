@@ -139,6 +139,7 @@ void MotionState::reset_runtime() {
     synthetic_tilt = false;
     stick_motion = false;
     gamepad_motion_seen = false;
+    has_gamepad_motion_support = false;
     synthetic_rotation = {};
     synthetic_rotation_rate = {};
     synthetic_turn = 0.0f;
@@ -314,6 +315,39 @@ void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_Gam
     handle_motion_event<SDL_GamepadSensorEvent>(emuenv, sensor_type, sensor);
 }
 
+void set_android_gamepad_motion(MotionState &state, const bool stick_sim, const int sensor_type, const float x, const float y, const float z, const uint64_t timestamp_ns) {
+    if (!state.is_sampling || stick_sim)
+        return;
+
+    // Android hands out a pad's own sensors in the pad's own frame: +x to its right, +y towards its
+    // top, +z out of its face. This is the mapping the pad branch above uses for what SDL delivers,
+    // so a pad read this way ends up in the same place as one SDL could see for itself.
+    const Util::Vec3f data = { x, -z, y };
+    const uint64_t timestamp_us = (timestamp_ns > 0)
+        ? timestamp_ns / 1000
+        : std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+
+    if (sensor_type == SDL_SENSOR_ACCEL) {
+        // gravity included, in metres per second squared; the pose keeps it normalized to g
+        state.motion_data.SetAcceleration(data / -SDL_STANDARD_GRAVITY);
+        state.last_updated_accel_timestamp = timestamp_us;
+    } else if (sensor_type == SDL_SENSOR_GYRO) {
+        // radians per second here, turns per second in the pose
+        state.motion_data.SetGyroscope(data / (2.f * std::numbers::pi_v<float>));
+        state.last_updated_gyro_timestamp = timestamp_us;
+    } else {
+        return;
+    }
+
+    // The pad owns the pose from the first sample on. The tablet keeps reporting its own zeros while
+    // it lies still, and those would overwrite these one for one.
+    if (!state.gamepad_motion_seen) {
+        state.gamepad_motion_seen = true;
+        LOG_INFO("[MOTION] the pad's own sensors are reporting, so its samples drive the pose from here on");
+    }
+    state.has_gamepad_motion_support = true;
+}
+
 // Builds the pose the synthetic tilt machinery holds. The touch panel and the right stick both end
 // up here, so the smoothing, the acceleration the pose reports and the gyro derived from how fast it
 // moves are the same whichever one is driving. scale widens the tilt for a player who wants a full
@@ -454,7 +488,7 @@ void refresh_motion(MotionState &state, CtrlState &ctrl_state) {
         return;
     }
 
-    if (!ctrl_state.has_motion_support && !state.has_device_motion_support)
+    if (!ctrl_state.has_motion_support && !state.has_device_motion_support && !state.has_gamepad_motion_support)
         return;
 
     state.motion_data.UpdateOrientation(state.last_updated_accel_timestamp - state.last_accel_timestamp);

@@ -23,6 +23,7 @@
 #include <SDL3/SDL_log.h>
 #include <ctrl/functions.h>
 #include <jni.h>
+#include <motion/functions.h>
 #include <touch/functions.h>
 
 #include <string>
@@ -208,6 +209,18 @@ Java_org_vita3k_emulator_Emulator_removeDirectPad(JNIEnv *env, jclass, jint devi
     auto *emuenv = get_emuenv();
     if (emuenv)
         ctrl_remove_direct_pad(*emuenv, device_id);
+}
+
+// A sample from a pad's own sensors, read by the Android layer through the input device's sensor
+// manager. SDL cannot see these on Android, so this is the only path that brings a Bluetooth pad's
+// gyro into the emulator.
+JNIEXPORT void JNICALL
+Java_org_vita3k_emulator_overlay_GamepadMotion_pushSample(JNIEnv *env, jobject thiz, jint type, jfloat x, jfloat y, jfloat z, jlong timestamp_ns) {
+    auto *emuenv = get_emuenv();
+    if (!emuenv)
+        return;
+
+    set_android_gamepad_motion(emuenv->motion, emuenv->cfg.motion_stick_sim, static_cast<int>(type), x, y, z, static_cast<uint64_t>(timestamp_ns));
 }
 
 } // extern "C"

@@ -73,6 +73,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private boolean mPadRearTouchMapping = true;
   private boolean mPadRearTouchSwipe = false;
   private boolean mPadTouchFront = false;
+  // reads the sensors a pad carries itself, which SDL cannot see on Android
+  private GamepadMotion mGamepadMotion;
   // what each mapping point does while a pad button holds it down; 0 keeps the plain tap
   private int[] mPadTouchGestures = new int[ButtonType.TOUCH_MAP_COUNT];
   private OverlayLayout mLayout;
@@ -152,6 +154,11 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     super.onAttachedToWindow();
     startHideTimer();
     updateVirtualControllerState();
+    // The pad's own sensors are read while the view is up: SDL cannot see them on Android, and a
+    // game that asks for a tilt has nothing to work with until they arrive.
+    if (mGamepadMotion == null)
+      mGamepadMotion = new GamepadMotion(getContext());
+    mGamepadMotion.start();
   }
 
   @Override
@@ -159,6 +166,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     stopHideTimer();
     releaseAllInputs();
     detachVirtualController();
+    if (mGamepadMotion != null)
+      mGamepadMotion.stop();
     super.onDetachedFromWindow();
   }
 
