@@ -72,6 +72,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   private boolean mPadTouchMapping = true;
   private boolean mPadRearTouchMapping = true;
   private boolean mPadRearTouchSwipe = false;
+  private boolean mPadTouchFront = false;
   // what each mapping point does while a pad button holds it down; 0 keeps the plain tap
   private int[] mPadTouchGestures = new int[ButtonType.TOUCH_MAP_COUNT];
   private OverlayLayout mLayout;
@@ -187,6 +188,10 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
       invalidate();
     }
 
+    // The first push in the constructor runs before the emulator has a native session, so every
+    // call came back -1 and the pad never had a place to press. State is applied again once the
+    // game is up, so this is where the places and the strokes actually land.
+    pushTouchMappingToNative();
     resetHideTimer();
     updateVirtualControllerState();
   }
@@ -806,24 +811,51 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
         setTouchState(restored);
     }
 
-    // hand the new places to the native side so the pad can hold them down straight away
+    // hand the mapping state to the native side: the new places first, then what each point does
+    // there, so a point the pad already holds keeps working
+    pushTouchMappingToNative();
+
+    invalidate();
+  }
+
+  /**
+   * Hands the touch mapping state to the native side: where every point sits, which points a pad
+   * button may hold, and what each one does while held.
+   *
+   * This runs again on every overlay state change, not just when the controls are rebuilt, because
+   * the rebuild happens while the overlay is being constructed  -  before the emulator has a native
+   * session  -  so every call at that point lands on nothing. A stroke chosen from the settings screen
+   * and stored before the game was started would otherwise never be sent at all.
+   */
+  private void pushTouchMappingToNative()
+  {
     syncTouchMapPositions();
-    // repeated on every rebuild on purpose: the native session may not have existed when the
-    // preference was first applied, and this is where it becomes live
     setPadTouchMapping(mPadTouchMapping);
     setPadRearTouchMapping(mPadRearTouchMapping);
     setPadRearTouchSwipe(mPadRearTouchSwipe);
-    // Repeated every rebuild like the switches above: a point can be held by a pad button long
-    // before the settings screen that chose its stroke was ever opened.
+    setPadTouchFront(mPadTouchFront);
     for (int i = 0; i < ButtonType.TOUCH_MAP_COUNT; i++)
       setMappedTouchGesture(i, mPadTouchGestures[i]);
-
-    invalidate();
   }
 
   public void resetButtonPlacement()
   {
     setLayout(OverlayStore.defaultLayout(getContext()), true);
+  }
+
+  /**
+   * Applies a configuration to controls that are already on screen. The controls read their
+   * settings once, when they are built, which is fine for a page opened before a game starts and
+   * wrong for the pages in the pause menu: those edit a config the running overlay never looks at
+   * again. Rebuilding only when something actually differs keeps this cheap to call on every state
+   * change.
+   */
+  public void setConfig(OverlayConfig config)
+  {
+    if (config == null)
+      return;
+
+    applyResolvedState(new OverlayState(config.normalized(), mLayout), true);
   }
 
   public void setScale(float scale){
@@ -1329,6 +1361,8 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
   public native void setPadRearTouchMapping(boolean enabled);
   // picks tap (false) or a downward stroke across the back panel (true) for those two points
   public native void setPadRearTouchSwipe(boolean enabled);
+  // sends every mapping point to the screen, so the triggers reach a game that reads only the front
+  public native void setPadTouchFront(boolean enabled);
   // what the finger does while a pad button holds a point down: 0 stays put, the rest run a stroke
   public native void setMappedTouchGesture(int slot, int gesture);
   public native void clearMappedTouch();
@@ -1371,6 +1405,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     boolean resolvedPadTouchMapping = normalizedConfig.getPadTouchMapping();
     boolean resolvedPadRearTouchMapping = normalizedConfig.getPadRearTouchMapping();
     boolean resolvedPadRearTouchSwipe = normalizedConfig.getPadRearTouchSwipe();
+    boolean resolvedPadTouchFront = normalizedConfig.getPadTouchFront();
     int[] resolvedPadTouchGestures = resolveGestures(normalizedConfig.getPadTouchGestures());
     boolean changed = !normalizedLayout.equals(mLayout)
             || Float.compare(mScale, resolvedScale) != 0
@@ -1379,6 +1414,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
             || mPadTouchMapping != resolvedPadTouchMapping
             || mPadRearTouchMapping != resolvedPadRearTouchMapping
             || mPadRearTouchSwipe != resolvedPadRearTouchSwipe
+            || mPadTouchFront != resolvedPadTouchFront
             || !Arrays.equals(mPadTouchGestures, resolvedPadTouchGestures);
 
     mLayout = normalizedLayout;
@@ -1388,6 +1424,7 @@ public final class InputOverlay extends SurfaceView implements OnTouchListener
     mPadTouchMapping = resolvedPadTouchMapping;
     mPadRearTouchMapping = resolvedPadRearTouchMapping;
     mPadRearTouchSwipe = resolvedPadRearTouchSwipe;
+    mPadTouchFront = resolvedPadTouchFront;
     mPadTouchGestures = resolvedPadTouchGestures;
 
     if (refresh && changed)

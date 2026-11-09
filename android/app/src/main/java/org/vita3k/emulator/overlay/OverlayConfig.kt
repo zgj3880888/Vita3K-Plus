@@ -18,8 +18,11 @@ object TouchGesture {
     const val RIGHT = 4
     const val RUB_H = 5
     const val RUB_V = 6
+    // a real click: the finger lands, waits a moment and lifts again on its own. What a menu entry or
+    // an on-screen prompt wants, and the one thing holding the button down cannot produce.
+    const val CLICK = 7
 
-    val ALL = listOf(NONE, UP, DOWN, LEFT, RIGHT, RUB_H, RUB_V)
+    val ALL = listOf(NONE, UP, DOWN, LEFT, RIGHT, RUB_H, RUB_V, CLICK)
 
     fun sanitize(gesture: Int): Int = if (gesture in ALL) gesture else NONE
 
@@ -39,6 +42,10 @@ data class OverlayConfig(
     // false taps the rear point, true drags it from the top of the panel to the bottom; games that
     // read the back panel as a gesture ignore a finger that never moves
     val padRearTouchSwipe: Boolean = false,
+    // Sends every mapping point to the front panel whatever its slot. A game that reads only the
+    // screen (Uncharted, and most of the library) never sees a rear point otherwise, so the triggers
+    // would be dead in exactly the game a pad player wants them for.
+    val padTouchFront: Boolean = false,
     // One entry per mapping point, in the order the points are numbered: the stroke that point runs
     // while a pad button holds it. Separate from the switches above on purpose, because what a point
     // does once pressed has nothing to do with whether the pad is allowed to press it.
@@ -126,6 +133,9 @@ data class OverlayConfig(
 
     fun withPadRearTouchSwipe(enabled: Boolean): OverlayConfig =
         copy(padRearTouchSwipe = enabled).normalized()
+
+    fun withPadTouchFront(enabled: Boolean): OverlayConfig =
+        copy(padTouchFront = enabled).normalized()
 
     fun withPadTouchGesture(index: Int, gesture: Int): OverlayConfig {
         if (index < 0 || index >= TouchGesture.slots()) return this

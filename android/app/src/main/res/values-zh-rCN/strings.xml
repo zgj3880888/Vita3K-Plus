@@ -376,8 +376,12 @@
     <string name="settings_touch_gesture_right">右滑</string>
     <string name="settings_touch_gesture_rub_h">横向擦</string>
     <string name="settings_touch_gesture_rub_v">纵向擦</string>
-    <string name="settings_touch_gesture_desc">点按是把一根手指按在原处不动。滑动会让手指从这个点的一侧走到另一侧，然后停在那一头直到你松手；擦拭是来回蹭几下，最后回到起始位置。每一下都只要零点几秒，就算中途松开按键也会自己走完，所以轻点一下也算一次完整的手势。如果游戏的反应像是你在拖动画面，说明这个点设成了滑动、而它想要的是点按；如果完全没反应，那正好相反。所有点的位置都不会变：这里只改手指怎么动，不碰点放在哪。</string>
-    <string name="settings_touch_gesture_note">1、2 号点受按键页的 L3/R3 开关控制，5、6 号点受背触页的 L2/R2 开关控制，对应开关关掉时这里会灰掉。3、4 号点没有按键能触发，所以不列出来。和其它按键布局一起按游戏单独保存。5、6 号点这里留在「点按」、而背触页的滑动开关打开时，仍然是原来那个贯穿背板的整条下滑。</string>
+    <string name="settings_touch_gesture_click">点击</string>
+    <string name="settings_touch_gesture_front_panel">所有点都报前触屏</string>
+    <string name="settings_touch_gesture_front_panel_summary">给只读前触屏的游戏用</string>
+    <string name="settings_touch_gesture_front_panel_desc">绝大多数游戏只读机身正面的触摸屏，接在背板点上的按键永远到不了它们那里：那些点报的是后触屏，游戏根本不看。打开这个开关后，包括 5、6 号在内的所有点都改为报前触屏。如果某个游戏确实要用背板，就关掉它，让点留在背板上。</string>
+    <string name="settings_touch_gesture_desc">点按是把一根手指按在原处不动，按住按键多久它就按多久。点击是让手指落下去、过一小会儿自己抬起来，这才是菜单项和屏幕上那些提示想要的动作：之后再按住按键也不会重复点第二次。滑动会让手指从这个点的一侧走到另一侧，然后停在那一头直到你松手；擦拭是来回蹭几下，最后回到起始位置。每一下都只要零点几秒，就算中途松开按键也会自己走完，所以轻点一下也算一次完整的手势。如果游戏的反应像是你在拖动画面，说明这个点设成了滑动、而它想要的是点按；如果完全没反应，那正好相反。所有点的位置都不会变：这里只改手指怎么动，不碰点放在哪。</string>
+    <string name="settings_touch_gesture_note">1、2 号点受按键页的 L3/R3 开关控制，5、6 号点受背触页的 L2/R2 开关控制，对应开关关掉时这里会灰掉。3、4 号点没有按键能触发，所以不列出来。和其它按键布局一起按游戏单独保存。5、6 号点这里留在「点按」、而背触页的滑动开关打开时，仍然是原来那个贯穿背板的整条下滑。点报送到前触屏还是后触屏，由上面的开关决定，不在这里。</string>
 
     <!-- Settings - Cheats tab -->
     <string name="settings_cheats_title">金手指</string>

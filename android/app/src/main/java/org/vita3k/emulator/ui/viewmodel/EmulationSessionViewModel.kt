@@ -31,6 +31,15 @@ data class EmulationSessionUiState(
     val overlayOpacity: Int = 100,
     val hideOverlayWhenControllerConnected: Boolean = true,
     val touchSwitchTilt: Boolean = false,
+    // The touch mapping switches and the stroke chosen for each point belong here too. They are not
+    // part of the mask, so this state used to drop them: the pause menu rebuilt the config from the
+    // five fields above, which meant a point's stroke was stored and then lost again the moment the
+    // next one was picked, and the page never showed what was already set.
+    val padTouchMapping: Boolean = true,
+    val padRearTouchMapping: Boolean = true,
+    val padRearTouchSwipe: Boolean = false,
+    val padTouchFront: Boolean = false,
+    val padTouchGestures: List<Int> = emptyList(),
     val controllerConnected: Boolean = false,
     val statusMessage: String? = null
 )
@@ -79,6 +88,10 @@ class EmulationSessionViewModel(application: Application) : AndroidViewModel(app
     fun applyOverlayState(emulator: Emulator) {
         emulator.setControllerOverlayScale(uiState.overlayScale / 100f)
         emulator.setControllerOverlayOpacity(uiState.overlayOpacity)
+        // The controls only read their settings when they are built, so a page edited from the pause
+        // menu used to be written to storage and then ignored until the game was started again. This
+        // is what makes a stroke chosen mid-game reach the running controls.
+        emulator.setControllerOverlayConfig(currentOverlayConfig())
         val visibleMask = when {
             uiState.showMenu -> 0
             uiState.isEditingControls -> activeOverlayMask()
@@ -285,7 +298,12 @@ class EmulationSessionViewModel(application: Application) : AndroidViewModel(app
             overlayScale = uiState.overlayScale,
             overlayOpacity = uiState.overlayOpacity,
             hideOverlayWhenControllerConnected = uiState.hideOverlayWhenControllerConnected,
-            touchSwitchTilt = uiState.touchSwitchTilt
+            touchSwitchTilt = uiState.touchSwitchTilt,
+            padTouchMapping = uiState.padTouchMapping,
+            padRearTouchMapping = uiState.padRearTouchMapping,
+            padRearTouchSwipe = uiState.padRearTouchSwipe,
+            padTouchFront = uiState.padTouchFront,
+            padTouchGestures = uiState.padTouchGestures
         ).normalized()
     }
 
@@ -384,7 +402,12 @@ class EmulationSessionViewModel(application: Application) : AndroidViewModel(app
             overlayScale = normalized.overlayScale,
             overlayOpacity = normalized.overlayOpacity,
             hideOverlayWhenControllerConnected = normalized.hideOverlayWhenControllerConnected,
-            touchSwitchTilt = normalized.touchSwitchTilt
+            touchSwitchTilt = normalized.touchSwitchTilt,
+            padTouchMapping = normalized.padTouchMapping,
+            padRearTouchMapping = normalized.padRearTouchMapping,
+            padRearTouchSwipe = normalized.padRearTouchSwipe,
+            padTouchFront = normalized.padTouchFront,
+            padTouchGestures = normalized.padTouchGestures
         )
     }
 }

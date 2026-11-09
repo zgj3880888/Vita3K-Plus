@@ -26,6 +26,7 @@ object OverlayStore {
     private const val KEY_PAD_TOUCH_MAP = "overlay_pad_touch_map"
     private const val KEY_PAD_REAR_TOUCH_MAP = "overlay_pad_rear_touch_map"
     private const val KEY_PAD_REAR_TOUCH_SWIPE = "overlay_pad_rear_touch_swipe"
+    private const val KEY_PAD_TOUCH_FRONT = "overlay_pad_touch_front"
     private const val KEY_PAD_TOUCH_GESTURES = "overlay_pad_touch_gestures"
     private const val KEY_CONFIG_PREFIX = "config"
     private const val KEY_LAYOUT_PREFIX = "layout"
@@ -223,6 +224,7 @@ object OverlayStore {
             putBoolean(configKey(normalizedScopeId, KEY_PAD_TOUCH_MAP), normalizedState.config.padTouchMapping)
             putBoolean(configKey(normalizedScopeId, KEY_PAD_REAR_TOUCH_MAP), normalizedState.config.padRearTouchMapping)
             putBoolean(configKey(normalizedScopeId, KEY_PAD_REAR_TOUCH_SWIPE), normalizedState.config.padRearTouchSwipe)
+            putBoolean(configKey(normalizedScopeId, KEY_PAD_TOUCH_FRONT), normalizedState.config.padTouchFront)
             // One joined string rather than a key per point: the number of points is not fixed, and a
             // short or long list read back is padded or trimmed where it is normalized.
             putString(
@@ -260,6 +262,7 @@ object OverlayStore {
             padTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_TOUCH_MAP), fallback.padTouchMapping),
             padRearTouchMapping = prefs.getBoolean(configKey(scopeId, KEY_PAD_REAR_TOUCH_MAP), fallback.padRearTouchMapping),
             padRearTouchSwipe = prefs.getBoolean(configKey(scopeId, KEY_PAD_REAR_TOUCH_SWIPE), fallback.padRearTouchSwipe),
+            padTouchFront = prefs.getBoolean(configKey(scopeId, KEY_PAD_TOUCH_FRONT), fallback.padTouchFront),
             padTouchGestures = parseGestures(
                 prefs.getString(configKey(scopeId, KEY_PAD_TOUCH_GESTURES), null),
                 fallback.padTouchGestures

@@ -30,6 +30,10 @@ void set_pad_rear_touch_mapping(TouchState &state, bool enabled);
 // stroke down the panel (on). Games that read the back panel as a gesture do not react to the
 // former, which is the whole reason this exists.
 void set_pad_rear_touch_swipe(TouchState &state, bool enabled);
+// Sends every mapping point to the screen instead of the back panel, whatever its slot. A game that
+// only reads the front panel never sees a rear point otherwise, which makes the triggers useless in
+// exactly the games a pad player would want them for.
+void set_pad_touch_front(TouchState &state, bool enabled);
 // Picks what the finger does while a pad button holds this point down: stay put, or run one of the
 // strokes in MappedTouchGesture. Staying put is what every earlier build did and what a game that
 // uses the panel as a button wants; a stroke is for the games that compare where the finger was

@@ -71,6 +71,11 @@ constexpr float RUB_SPAN = 0.36f;
 constexpr float RUB_PASSES = 2.5f;
 constexpr float TWO_PI = 6.28318530718f;
 
+// How long the finger of a click stays down. Short enough to read as a tap rather than a hold,
+// long enough that a game polling once per frame always sees it; the finger lifts on its own
+// afterwards instead of waiting for the button, which is what a menu entry wants.
+constexpr uint64_t CLICK_US = 90000;
+
 static uint64_t touch_now_us() {
     return std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -301,16 +306,19 @@ void touch_vsync_update(EmuEnvState &emuenv) {
             for (int port = 0; port < 2; port++) {
                 SceTouchData &data = buffers[port];
                 for (int slot = 0; slot < MAX_MAPPED_TOUCH; slot++) {
-                    const MappedTouch &point = touch.mapped_touch[slot];
-                    if (!point.held() || data.reportNum >= SCE_TOUCH_MAX_REPORT)
+                    MappedTouch &point = touch.mapped_touch[slot];
+                    if (!point.held() || point.click_done || data.reportNum >= SCE_TOUCH_MAX_REPORT)
                         continue;
-                    // A rear point only ever reports on the back panel: it is the pad's triggers that
+                    // A rear point reports on the back panel by default: it is the pad's triggers that
                     // hold it, and driving it from the front would put a finger on the screen where
-                    // the ring is not even drawn. Every other point follows the front/back switch,
-                    // so it keeps working on whichever panel the player picked.
-                    const bool wants_port = (slot >= MAPPED_TOUCH_REAR_FIRST)
-                        ? (port == SCE_TOUCH_PORT_BACK)
-                        : (touch.touchscreen_both || port == touch.touchscreen_port);
+                    // the ring is not even drawn. Every other point follows the front/back switch.
+                    // With the front-panel switch on, everything reports on the screen instead, which
+                    // is the only panel a game like Uncharted ever reads.
+                    const bool wants_port = touch.pad_touch_front
+                        ? (port == SCE_TOUCH_PORT_FRONT)
+                        : ((slot >= MAPPED_TOUCH_REAR_FIRST)
+                                  ? (port == SCE_TOUCH_PORT_BACK)
+                                  : (touch.touchscreen_both || port == touch.touchscreen_port));
                     if (!wants_port)
                         continue;
                     // the point is over the letterbox rather than the panel: nothing to report
@@ -324,6 +332,13 @@ void touch_vsync_update(EmuEnvState &emuenv) {
                         const uint64_t stroke_elapsed = (mapped_now_us > point.stroke_start_us)
                             ? mapped_now_us - point.stroke_start_us
                             : 0;
+                        // A click is over as soon as its short stay runs out: the finger lifts by
+                        // itself and the button being held down does not keep it on the panel, so
+                        // holding produces one tap rather than one long press.
+                        if (point.stroke_gesture == TOUCH_GESTURE_CLICK && stroke_elapsed >= point.stroke_duration_us) {
+                            point.click_done = true;
+                            continue;
+                        }
                         const float stroke_t = (point.stroke_duration_us == 0)
                             ? 1.f
                             : std::min(1.f, static_cast<float>(stroke_elapsed) / static_cast<float>(point.stroke_duration_us));
@@ -440,6 +455,11 @@ static void begin_stroke(MappedTouch &point, const bool rear_swipe) {
         to_y = point.y + rub_half;
         duration = RUB_US;
         break;
+    case TOUCH_GESTURE_CLICK:
+        // A click does not travel: the finger lands on the point and lifts again after a moment,
+        // which is the whole of what an on-screen button wants.
+        duration = CLICK_US;
+        break;
     default:
         return;
     }
@@ -501,32 +521,37 @@ int set_mapped_touch_pad(TouchState &state, const int slot, const bool active) {
         // exactly the thing a gesture-reading game ignores; this is also what makes a quick tap on
         // the button produce a complete stroke. The ctrl side polls every frame, so the release
         // lands on the first poll after the stroke ends.
-        if (point.stroke_started && touch_now_us() - point.stroke_start_us < point.stroke_duration_us) {
+        if (point.stroke_started && point.stroke_gesture != TOUCH_GESTURE_CLICK && touch_now_us() - point.stroke_start_us < point.stroke_duration_us) {
             point.stroke_release = true;
             return 0;
         }
         point.pad_active = false;
         point.stroke_started = false;
         point.stroke_release = false;
+        // The button has to come up before the next click can land, which is what makes one press
+        // one click instead of a stream of them.
+        point.click_done = false;
         return 0;
     }
 
     // Pressed again while a release was still finishing its stroke: carry on from there instead of
     // restarting, so a player tapping in rhythm does not cut the stroke short every time.
-    if (point.stroke_started) {
-        point.stroke_release = false;
+    if (point.stroke_started)
         return 0;
-    }
 
-    // Without a reported position the point has nowhere to go. The overlay always sends one as
-    // soon as it has a size, so this only bites if the pad is pressed on the very first frame.
+    // Without a reported position the point has nowhere to go, and the overlay is the only thing
+    // that knows where the player put it. It reports on every layout, but this guard has been the
+    // reason a pad press could do nothing at all, so it gets a place to land instead of a refusal:
+    // the middle of the screen, which is where the prompts of a front-touch game usually sit.
     if (!point.has_position) {
-        LOG_WARN_ONCE("[TOUCH] pad touch mapping has no position yet; open the controls editor once to place the points");
-        return -1;
+        point.x = 0.5f;
+        point.y = 0.5f;
+        LOG_WARN_ONCE("[TOUCH] pad touch mapping had no position; using the middle of the screen until the controls editor sends one");
     }
     const bool was_held = point.pad_active;
     mapped_touch_down(state, point);
     point.pad_active = true;
+    point.click_done = false;
     begin_stroke(point, rear_swipe);
     if (!was_held) {
         if (point.stroke_started)
@@ -597,7 +622,13 @@ void clear_mapped_touch(TouchState &state) {
         point.pad_active = false;
         point.stroke_started = false;
         point.stroke_release = false;
+        point.click_done = false;
     }
+}
+
+void set_pad_touch_front(TouchState &state, const bool enabled) {
+    const std::lock_guard<std::mutex> lock(state.finger_mutex);
+    state.pad_touch_front = enabled;
 }
 
 void pinch_modifier(TouchState &state, bool isHold) {

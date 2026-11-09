@@ -66,6 +66,7 @@ import org.libsdl.app.SDLSurface;
 import org.vita3k.emulator.data.AppStorage;
 import org.vita3k.emulator.data.NativeImeState;
 import org.vita3k.emulator.overlay.InputOverlay;
+import org.vita3k.emulator.overlay.OverlayConfig;
 import org.vita3k.emulator.overlay.OverlayLayout;
 import org.vita3k.emulator.overlay.OverlayStore;
 import org.vita3k.emulator.ui.screens.emulation.NativeImeOverlayHost;
@@ -832,6 +833,13 @@ public class Emulator extends SDLActivity
         InputOverlay overlay = getmOverlay();
         if (overlay != null && layout != null)
             overlay.setLayout(layout);
+    }
+
+    @Keep
+    public void setControllerOverlayConfig(OverlayConfig config) {
+        InputOverlay overlay = getmOverlay();
+        if (overlay != null && config != null)
+            overlay.setConfig(config);
     }
 
     private int mSavedOverlayMask = 0;

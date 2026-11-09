@@ -35,6 +35,10 @@ enum MappedTouchGesture : uint8_t {
     TOUCH_GESTURE_RIGHT,
     TOUCH_GESTURE_RUB_H, // back and forth across, for the wiping a game asks to be rubbed off
     TOUCH_GESTURE_RUB_V,
+    // A real click: the finger goes down, stays for a moment and lifts again, all from one press of
+    // the button. Holding the button down afterwards does not keep the finger there. This is what
+    // a menu entry or an on-screen prompt wants, and it is the one thing a held-down tap cannot do.
+    TOUCH_GESTURE_CLICK,
     TOUCH_GESTURE_COUNT
 };
 
@@ -56,6 +60,8 @@ struct MappedTouch {
     float stroke_from_y = 0.f;
     float stroke_to_x = 0.f;
     float stroke_to_y = 0.f;
+    // The click already delivered its finger-up and must stay up until the button is released.
+    bool click_done = false;
     float x = 0.f; // normalized over the drawable area, same space as SDL finger events
     float y = 0.f;
     uint8_t id = 0; // touch id handed out when the point goes down
@@ -114,6 +120,11 @@ struct TouchState {
     // touch, and a stationary touch is all a tap can produce; this is the switch that lets the
     // player pick whichever of the two the game in front of them actually understands.
     std::atomic<bool> pad_rear_touch_swipe{ false };
+    // When set, every mapping point reports on the front panel, whatever its slot and whatever the
+    // front/back switch says. A game that only reads the screen (Uncharted and most of the rest)
+    // never looks at the back panel, so a rear point driving a front-touch action would be dead
+    // without this. Off by default: the games that put buttons on the back panel need the old rule.
+    std::atomic<bool> pad_touch_front{ false };
     static constexpr SceInt16 initial_pinch_dist = 300;
     SceInt16 pinch_dist = initial_pinch_dist;
     SceInt16 pinch_speed = 40;

@@ -36,11 +36,27 @@ internal fun TouchGestureSettingsSection(
         stringResource(R.string.settings_touch_gesture_left),
         stringResource(R.string.settings_touch_gesture_right),
         stringResource(R.string.settings_touch_gesture_rub_h),
-        stringResource(R.string.settings_touch_gesture_rub_v)
+        stringResource(R.string.settings_touch_gesture_rub_v),
+        stringResource(R.string.settings_touch_gesture_click)
     )
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         SettingsNote(text = stringResource(R.string.settings_touch_gesture_intro))
+        SettingsToggleRow(
+            title = stringResource(R.string.settings_touch_gesture_front_panel),
+            checked = overlayConfig.padTouchFront,
+            onCheckedChange = { onOverlayConfigChange(overlayConfig.withPadTouchFront(it)) },
+            // on for the games that only read the screen; almost all of them do, so this is the
+            // switch that decides whether L2/R2 do anything at all outside a rear-panel game
+            enabled = true,
+            summary = stringResource(R.string.settings_touch_gesture_front_panel_summary),
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_touch_gesture_front_panel),
+                body = stringResource(R.string.settings_touch_gesture_front_panel_desc),
+                scope = SettingsScope.Both
+            ),
+            onShowHelp = onShowHelp
+        )
         TouchGesturePoints.forEach { point ->
             val gesture = overlayConfig.gestureFor(point.slot)
             SettingsChoiceSelector(
