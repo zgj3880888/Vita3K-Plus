@@ -223,6 +223,43 @@ internal fun ControllerMappingSections(
             onShowHelp = onShowHelp
         )
         SettingsToggleRow(
+            title = stringResource(R.string.settings_controls_stick_motion),
+            checked = cfg.motionStickSim,
+            onCheckedChange = { checked ->
+                onUpdate { motionStickSim = checked }
+            },
+            // greyed out while motion is disabled outright: nothing below it can report anything then
+            enabled = !cfg.disableMotion,
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_controls_stick_motion),
+                body = stringResource(R.string.settings_controls_stick_motion_desc),
+                scope = SettingsScope.Global
+            ),
+            onShowHelp = onShowHelp
+        )
+        SettingsSliderRow(
+            title = stringResource(R.string.settings_controls_stick_motion_sensitivity),
+            valueLabel = stringResource(
+                R.string.settings_controls_stick_motion_sensitivity_value,
+                (cfg.motionStickSensitivity.coerceIn(0.25f, 3.0f) * 100f).roundToInt()
+            ),
+            value = (cfg.motionStickSensitivity * 100f).coerceIn(25f, 300f),
+            onValueChange = {
+                onUpdate {
+                    motionStickSensitivity = (it.roundToInt() / 100f).coerceIn(0.25f, 3.0f)
+                }
+            },
+            valueRange = 25f..300f,
+            steps = 274,
+            enabled = cfg.motionStickSim && !cfg.disableMotion,
+            help = SettingsHelpEntry(
+                title = stringResource(R.string.settings_controls_stick_motion_sensitivity),
+                body = stringResource(R.string.settings_controls_stick_motion_sensitivity_desc),
+                scope = SettingsScope.Global
+            ),
+            onShowHelp = onShowHelp
+        )
+        SettingsToggleRow(
             title = stringResource(R.string.settings_controls_swap_triggers),
             checked = cfg.controllerSwapTriggers,
             onCheckedChange = { checked ->

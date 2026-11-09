@@ -659,6 +659,11 @@
     <string name="settings_controls_multiplier_value">%1$.1fx</string>
     <string name="settings_controls_disable_motion">Disable Motion Controls</string>
     <string name="settings_controls_disable_motion_desc">Ignore controller and device motion sensors for games that expect gyro or accelerometer input.</string>
+    <string name="settings_controls_stick_motion">Simulate Motion with the Right Stick</string>
+    <string name="settings_controls_stick_motion_desc">Sections that ask for the gyroscope - balancing on a beam, walking a wire, aiming a shot by tilting - get their pose from the right stick instead. Push it the way you want to lean and it holds that angle; let go and the view eases back to level. Any pad works, including ones with no sensors of their own. While this is on it takes over from the pad\'s real gyroscope and the tablet\'s, so the pose is whatever the stick says and nothing else.</string>
+    <string name="settings_controls_stick_motion_sensitivity">Stick Motion Sensitivity</string>
+    <string name="settings_controls_stick_motion_sensitivity_value">%1$d%%</string>
+    <string name="settings_controls_stick_motion_sensitivity_desc">How far the stick has to travel for a full lean. Above 100%% a small push already reaches the angle the stick would at its edge, which suits aiming; below 100%% it leaves more room for fine adjustments, which suits balancing.</string>
     <string name="settings_controls_swap_triggers">Swap L1/R1 with L2/R2</string>
     <string name="settings_controls_swap_triggers_desc">The controller\'s triggers press L1/R1 (the Vita\'s L and R buttons) and its shoulder buttons press L2/R2. Useful for racing games and shooters.</string>
     <string name="settings_controls_capture_button_prompt">Press a controller button now, or choose a mapping from the list below.</string>

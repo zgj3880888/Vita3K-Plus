@@ -66,6 +66,8 @@ struct EmulatorConfigFields {
     jfieldID audioVolume = nullptr;
     jfieldID ngsEnable = nullptr;
     jfieldID disableMotion = nullptr;
+    jfieldID motionStickSim = nullptr;
+    jfieldID motionStickSensitivity = nullptr;
     jfieldID controllerAnalogMultiplier = nullptr;
     jfieldID controllerSwapTriggers = nullptr;
     jfieldID controllerBinds = nullptr;
@@ -154,6 +156,8 @@ EmulatorConfigFields resolve_config_fields(JNIEnv *env) {
     fields.audioVolume = env->GetFieldID(fields.cls, "audioVolume", "I");
     fields.ngsEnable = env->GetFieldID(fields.cls, "ngsEnable", "Z");
     fields.disableMotion = env->GetFieldID(fields.cls, "disableMotion", "Z");
+    fields.motionStickSim = env->GetFieldID(fields.cls, "motionStickSim", "Z");
+    fields.motionStickSensitivity = env->GetFieldID(fields.cls, "motionStickSensitivity", "F");
     fields.controllerAnalogMultiplier = env->GetFieldID(fields.cls, "controllerAnalogMultiplier", "F");
     fields.controllerSwapTriggers = env->GetFieldID(fields.cls, "controllerSwapTriggers", "Z");
     fields.controllerBinds = env->GetFieldID(fields.cls, "controllerBinds", "[I");
@@ -345,6 +349,8 @@ void fill_config_object(JNIEnv *env, jobject obj, const EmulatorConfigFields &fi
     env->SetIntField(obj, fields.audioVolume, static_cast<jint>(current_config.audio_volume));
     env->SetBooleanField(obj, fields.ngsEnable, current_config.ngs_enable);
     env->SetBooleanField(obj, fields.disableMotion, config.disable_motion);
+    env->SetBooleanField(obj, fields.motionStickSim, config.motion_stick_sim);
+    env->SetFloatField(obj, fields.motionStickSensitivity, config.motion_stick_sensitivity);
     env->SetFloatField(obj, fields.controllerAnalogMultiplier, config.controller_analog_multiplier);
     env->SetBooleanField(obj, fields.controllerSwapTriggers, config.controller_swap_triggers);
     set_int_array_field(env, obj, fields.controllerBinds, normalized_controller_binds(config));
@@ -494,6 +500,8 @@ void read_config_object(JNIEnv *env, jobject obj, const EmulatorConfigFields &fi
     current_config.audio_volume = static_cast<int>(env->GetIntField(obj, fields.audioVolume));
     current_config.ngs_enable = env->GetBooleanField(obj, fields.ngsEnable) != JNI_FALSE;
     config.disable_motion = env->GetBooleanField(obj, fields.disableMotion) != JNI_FALSE;
+    config.motion_stick_sim = env->GetBooleanField(obj, fields.motionStickSim) != JNI_FALSE;
+    config.motion_stick_sensitivity = env->GetFloatField(obj, fields.motionStickSensitivity);
     config.controller_analog_multiplier = env->GetFloatField(obj, fields.controllerAnalogMultiplier);
     config.controller_swap_triggers = env->GetBooleanField(obj, fields.controllerSwapTriggers) != JNI_FALSE;
     read_int_array_field(env, obj, fields.controllerBinds, config.controller_binds);

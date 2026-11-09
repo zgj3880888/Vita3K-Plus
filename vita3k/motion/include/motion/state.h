@@ -55,6 +55,12 @@ struct MotionState {
     bool has_device_motion_support = false;
     bool is_sampling = false;
     bool synthetic_tilt = false;
+    // The right stick is standing in for the six-axis sensors. The pose is built by the same code as
+    // the touch panel tilt, so this is what tells the touch tilt to keep its hands off while it runs.
+    bool stick_motion = false;
+    // Set as soon as a pad reports a sensor sample. The device sensors write the same pose, and a
+    // tablet lying still on a table would otherwise overwrite every sample the pad sends.
+    bool gamepad_motion_seen = false;
     Util::Vec3f synthetic_rotation;
     Util::Vec3f synthetic_rotation_rate;
     float synthetic_turn = 0.0f;

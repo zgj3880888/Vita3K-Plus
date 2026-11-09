@@ -75,6 +75,12 @@ struct CtrlState {
 
     VirtualKeyboardState keyboard_state;
 
+    // The last right-stick reading, kept for the motion layer to run the tilt simulation from. Pads
+    // are read whenever the game asks for input, and the pose is built once per vblank, so the value
+    // is carried across instead of being fetched from SDL a second time on another thread.
+    std::atomic<float> motion_stick_x{ 0.f };
+    std::atomic<float> motion_stick_y{ 0.f };
+
     // separate so neither writer can clear the other's block
     std::atomic<bool> native_overlay_intercepted{ false };
     std::atomic<bool> session_input_intercepted{ false };
@@ -97,6 +103,8 @@ struct CtrlState {
         input_mode = SCE_CTRL_MODE_DIGITAL;
         input_mode_ext = SCE_CTRL_MODE_DIGITAL;
         std::fill_n(last_vcount, 5, 0);
+        motion_stick_x = 0.f;
+        motion_stick_y = 0.f;
         keyboard_state = {};
         native_overlay_intercepted.store(false, std::memory_order_relaxed);
         session_input_intercepted.store(false, std::memory_order_relaxed);

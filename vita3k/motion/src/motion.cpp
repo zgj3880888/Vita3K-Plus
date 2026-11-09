@@ -137,6 +137,8 @@ void MotionState::start_sensor_sampling() {
 void MotionState::reset_runtime() {
     stop_sensor_sampling();
     synthetic_tilt = false;
+    stick_motion = false;
+    gamepad_motion_seen = false;
     synthetic_rotation = {};
     synthetic_rotation_rate = {};
     synthetic_turn = 0.0f;
@@ -245,12 +247,27 @@ static void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const 
     if (!emuenv.motion.is_sampling)
         return;
 
+    // The stick is standing in for the sensors, so a sample from either one would be a second writer
+    // of the pose it is already holding.
+    if (emuenv.cfg.motion_stick_sim)
+        return;
+
     if (!emuenv.ctrl.has_motion_support && !emuenv.motion.has_device_motion_support)
+        return;
+
+    // A pad and the device both write the same pose, and the device keeps reporting even when it is
+    // lying still on a table, so its zeros would overwrite every sample the pad sends. Once a pad has
+    // reported, it owns the pose: it is the one the player is actually turning.
+    const bool from_gamepad = sensor.type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
+    if (from_gamepad) {
+        if (!emuenv.motion.gamepad_motion_seen)
+            LOG_INFO("[MOTION] the pad is reporting its own sensors, so its samples drive the pose from here on");
+        emuenv.motion.gamepad_motion_seen = true;
+    } else if (emuenv.motion.gamepad_motion_seen)
         return;
 
     const auto get_processed_sensor_data = [&]() {
         Util::Vec3f data = { sensor.data[0], sensor.data[1], sensor.data[2] };
-        const auto from_gamepad = sensor.type == SDL_EVENT_GAMEPAD_SENSOR_UPDATE;
         if (!from_gamepad) {
             switch (emuenv.motion.device_native_rotation) {
             case ROTATION_90: // portrait -> landscape left
@@ -297,36 +314,26 @@ void handle_motion_event(EmuEnvState &emuenv, int32_t sensor_type, const SDL_Gam
     handle_motion_event<SDL_GamepadSensorEvent>(emuenv, sensor_type, sensor);
 }
 
-void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, const bool active, const float x, const float y) {
-    if (!state.is_sampling)
-        return;
-
-    if (ctrl_state.has_motion_support || state.has_device_motion_support) {
-        if (state.synthetic_tilt) {
-            const std::lock_guard<std::mutex> guard(state.mutex);
-            state.synthetic_tilt = false;
-            state.synthetic_rotation = {};
-            state.synthetic_rotation_rate = {};
-            state.synthetic_turn = 0.0f;
-            state.synthetic_turn_rate = 0.0f;
-            state.synthetic_gyro = {};
-        }
-        return;
-    }
-
-    if (!active && !state.synthetic_tilt)
-        return;
-
+// Builds the pose the synthetic tilt machinery holds. The touch panel and the right stick both end
+// up here, so the smoothing, the acceleration the pose reports and the gyro derived from how fast it
+// moves are the same whichever one is driving. scale widens the tilt for a player who wants a full
+// lean from less travel; turn_share decides how much of the sideways push also turns the view, which
+// the touch panel has always done and the stick must not, or the view would swing every time the
+// stick leaned.
+static void apply_synthetic_pose(MotionState &state, const bool active, const float x, const float y, const float scale, const float turn_share) {
     constexpr float max_tilt = std::numbers::pi_v<float> / 4.0f;
     constexpr float max_turn = 2.0f * std::numbers::pi_v<float> / 3.0f;
     constexpr float response = 15.0f;
     const float reach = std::sqrt(x * x + y * y);
     Util::Vec3f target;
     if (active && reach > 0.0f) {
-        const float angle = std::min(reach, 1.0f) * max_tilt;
+        // the widened tilt stops short of a right angle, where the orientation would be ambiguous
+        const float angle = std::min(std::min(reach, 1.0f) * max_tilt * scale, 1.45f);
         target = { y / reach * angle, x / reach * angle, 0.0f };
     }
-    const float target_turn = active ? -std::clamp(x, -1.0f, 1.0f) * max_turn : 0.0f;
+    const float target_turn = (active && turn_share > 0.0f)
+        ? -std::clamp(x, -1.0f, 1.0f) * max_turn * turn_share
+        : 0.0f;
     const uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 
     const std::lock_guard<std::mutex> guard(state.mutex);
@@ -376,6 +383,64 @@ void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, const bool 
 
     state.motion_data.SetAcceleration(Util::QuaternionRotate(current.Inverse(), Util::Vec3f{ 0.0f, 0.0f, -1.0f }));
     state.last_updated_accel_timestamp = now;
+}
+
+void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, const bool active, const float x, const float y) {
+    if (!state.is_sampling)
+        return;
+
+    // the stick is working the pose this frame; the panel must not fight it for the same fields
+    if (state.stick_motion)
+        return;
+
+    if (ctrl_state.has_motion_support || state.has_device_motion_support) {
+        if (state.synthetic_tilt) {
+            const std::lock_guard<std::mutex> guard(state.mutex);
+            state.synthetic_tilt = false;
+            state.synthetic_rotation = {};
+            state.synthetic_rotation_rate = {};
+            state.synthetic_turn = 0.0f;
+            state.synthetic_turn_rate = 0.0f;
+            state.synthetic_gyro = {};
+        }
+        return;
+    }
+
+    if (!active && !state.synthetic_tilt)
+        return;
+
+    apply_synthetic_pose(state, active, x, y, 1.0f, 1.0f);
+}
+
+void update_stick_motion(MotionState &state, const bool enabled, const float sensitivity, const float x, const float y) {
+    // Sampling stops whenever no game holds the sensors open, and a simulation that kept running
+    // would leave a pose behind for the next game to find. Give the pose back when it does.
+    if (!enabled || !state.is_sampling) {
+        if (!state.stick_motion)
+            return;
+
+        state.stick_motion = false;
+        if (!state.synthetic_tilt)
+            return;
+
+        const std::lock_guard<std::mutex> guard(state.mutex);
+        state.synthetic_tilt = false;
+        state.synthetic_rotation = {};
+        state.synthetic_rotation_rate = {};
+        state.synthetic_turn = 0.0f;
+        state.synthetic_turn_rate = 0.0f;
+        state.synthetic_gyro = {};
+        return;
+    }
+
+    if (!state.stick_motion) {
+        state.stick_motion = true;
+        LOG_INFO("[MOTION] the right stick is standing in for the six-axis sensors (sensitivity {:.2f})", sensitivity);
+    }
+    // Always active, a centred stick included: the pose is meant to ease back to level on its own,
+    // and stopping the simulation on a centred stick would hand the pose to sensors the pad may not
+    // even have, which is the very thing this mode exists to avoid.
+    apply_synthetic_pose(state, true, x, y, sensitivity, 0.0f);
 }
 
 void refresh_motion(MotionState &state, CtrlState &ctrl_state) {

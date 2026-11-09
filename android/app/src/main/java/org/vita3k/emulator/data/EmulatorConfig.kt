@@ -39,6 +39,11 @@ class EmulatorConfig {
     @JvmField var audioVolume: Int = 100
     @JvmField var ngsEnable: Boolean = true
     @JvmField var disableMotion: Boolean = false
+    // The right stick stands in for the six-axis sensors: for pads that have none at all, and for a
+    // player who would rather tilt with the stick than wave the pad at the screen. Sensitivity
+    // widens the tilt so a full lean arrives before the stick reaches its edge.
+    @JvmField var motionStickSim: Boolean = false
+    @JvmField var motionStickSensitivity: Float = 1.0f
     @JvmField var controllerAnalogMultiplier: Float = 1.0f
     @JvmField var controllerSwapTriggers: Boolean = false
     @JvmField var controllerBinds: IntArray = defaultControllerBinds()
@@ -127,6 +132,8 @@ class EmulatorConfig {
         config.audioVolume = audioVolume
         config.ngsEnable = ngsEnable
         config.disableMotion = disableMotion
+        config.motionStickSim = motionStickSim
+        config.motionStickSensitivity = motionStickSensitivity
         config.controllerAnalogMultiplier = controllerAnalogMultiplier
         config.controllerSwapTriggers = controllerSwapTriggers
         config.controllerBinds = controllerBinds.copyOf()
@@ -209,6 +216,8 @@ class EmulatorConfig {
             audioVolume == other.audioVolume &&
             ngsEnable == other.ngsEnable &&
             disableMotion == other.disableMotion &&
+            motionStickSim == other.motionStickSim &&
+            motionStickSensitivity == other.motionStickSensitivity &&
             controllerAnalogMultiplier == other.controllerAnalogMultiplier &&
             controllerSwapTriggers == other.controllerSwapTriggers &&
             controllerBinds.contentEquals(other.controllerBinds) &&
@@ -288,6 +297,8 @@ class EmulatorConfig {
         result = 31 * result + audioVolume
         result = 31 * result + ngsEnable.hashCode()
         result = 31 * result + disableMotion.hashCode()
+        result = 31 * result + motionStickSim.hashCode()
+        result = 31 * result + motionStickSensitivity.hashCode()
         result = 31 * result + controllerAnalogMultiplier.hashCode()
         result = 31 * result + controllerSwapTriggers.hashCode()
         result = 31 * result + controllerBinds.contentHashCode()

@@ -204,6 +204,8 @@ using PhysicalKeyCode = input::PhysicalKeyCode;
     code(int, "performance-overlay-position", static_cast<int>(TOP_LEFT), performance_overlay_position) \
     code(int, "screenshot-format", static_cast<int>(JPEG), screenshot_format)                           \
     code(bool, "disable-motion", false, disable_motion)                                                 \
+    code(bool, "motion-stick-sim", false, motion_stick_sim)                                             \
+    code(float, "motion-stick-sensitivity", 1.0f, motion_stick_sensitivity)                             \
     code(float, "controller-analog-multiplier", 1.0f, controller_analog_multiplier)                     \
     code(bool, "controller-swap-triggers", false, controller_swap_triggers)                             \
     CONFIG_KEYBOARD(code)                                                                               \

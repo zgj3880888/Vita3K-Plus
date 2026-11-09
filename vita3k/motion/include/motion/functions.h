@@ -37,4 +37,8 @@ void set_angle_threshold(MotionState &state, SceFloat setValue);
 SceFVector3 get_basic_orientation(const MotionState &state);
 
 void set_touch_tilt(MotionState &state, const CtrlState &ctrl_state, bool active, float x, float y);
+// Runs the six-axis pose from the right stick for pads that have no sensors of their own, or for a
+// player who would rather aim with the stick than wave the pad about. Takes over from both the touch
+// panel tilt and the real sensors while enabled, and hands the pose back when switched off.
+void update_stick_motion(MotionState &state, bool enabled, float sensitivity, float x, float y);
 void refresh_motion(MotionState &state, CtrlState &ctrl_state);

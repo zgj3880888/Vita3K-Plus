@@ -645,6 +645,9 @@ static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool n
         // the pause menu is up: never let a pad button keep a finger on the panel, front or back
         for (int slot = 0; slot < MAX_MAPPED_TOUCH; slot++)
             set_mapped_touch_pad(emuenv.touch, slot, false);
+        // and no stick is leaning while the menu is open, so the simulated pose levels out
+        state.motion_stick_x = 0.f;
+        state.motion_stick_y = 0.f;
         reset_axes();
         return;
     }
@@ -690,6 +693,13 @@ static void retrieve_ctrl_data(EmuEnvState &emuenv, int port, bool is_v2, bool n
                     axes[i] = moved[i];
             }
         }
+    }
+
+    if (port == 1) {
+        // Kept for the motion layer, which builds its pose once per vblank instead of here. Every
+        // pad's right stick is summed above, so the total can overshoot and is clamped.
+        state.motion_stick_x = std::clamp(axes[2], -1.f, 1.f);
+        state.motion_stick_y = std::clamp(axes[3], -1.f, 1.f);
     }
 
     reset_axes();
