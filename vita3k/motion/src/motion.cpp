@@ -139,7 +139,9 @@ void MotionState::reset_runtime() {
     synthetic_tilt = false;
     stick_motion = false;
     gamepad_motion_seen = false;
-    has_gamepad_motion_support = false;
+    // has_gamepad_motion_support is left alone: whether the pad has sensors is a fact about the
+    // hardware, not about this session, and a game that asks before the first sample arrives still
+    // needs the answer from the last one.
     synthetic_rotation = {};
     synthetic_rotation_rate = {};
     synthetic_turn = 0.0f;
