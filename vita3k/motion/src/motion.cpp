@@ -21,6 +21,10 @@
 
 #include <ctrl/state.h>
 
+// the settings are read here directly: whether the stick stands in for the sensors is a property of
+// the game's configuration, not of the motion state it feeds
+#include <config/state.h>
+
 #include <util/log.h>
 
 #include <SDL3/SDL_gamepad.h>

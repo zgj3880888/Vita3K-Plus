@@ -21,6 +21,7 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_joystick.h>
 #include <SDL3/SDL_log.h>
+#include <config/state.h>
 #include <ctrl/functions.h>
 #include <jni.h>
 #include <motion/functions.h>
