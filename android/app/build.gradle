@@ -48,7 +48,7 @@ android {
 		minSdk = 28
 		targetSdk = 35
 		versionCode = appVerHi * 100 + appVerMid * 10 + appVerLo
-		versionName = appVersionName + "-uc-render1"
+		versionName = appVersionName + "-uc-driver1"
 
 		ndk {
 			// x86_64 is emulator-only and broken here: vcpkg OpenSSL cannot assemble its x86 SM3/SM4 code with the NDK.

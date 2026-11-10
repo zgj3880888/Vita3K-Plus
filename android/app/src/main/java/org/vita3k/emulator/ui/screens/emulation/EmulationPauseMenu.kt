@@ -306,8 +306,17 @@ private fun EmulationPauseMenu(
             },
             confirmButton = {
                 TextButton(onClick = {
+                    // A custom Vulkan driver can only be swapped in a fresh process: libadrenotools keeps the
+                    // loaded driver in a process-wide hook table and never dlclose()s the old .so, so an
+                    // in-process relaunch leaves two drivers mapped at once and the next launch fails to
+                    // create its VkInstance/surface/queue. Everything else keeps the cheaper in-process restart.
+                    val requiresFreshProcess = settings.any { it == RestartRequiredSetting.CustomDriver }
                     pendingRestartSettings = null
-                    activity.restartApp(uiState.titleId, "", "")
+                    if (requiresFreshProcess) {
+                        activity.relaunchProcess(uiState.titleId)
+                    } else {
+                        activity.restartApp(uiState.titleId, "", "")
+                    }
                 }) {
                     Text(stringResource(R.string.settings_restart_app))
                 }
