@@ -142,8 +142,14 @@ COMMAND(handle_set_context) {
     if (depth_stencil_surface && !depth_stencil_surface->disabled()) {
         render_context->record.depth_stencil_surface = *depth_stencil_surface;
     } else {
-        render_context->record.depth_stencil_surface.depth_data.reset();
-        render_context->record.depth_stencil_surface.stencil_data.reset();
+        // A scene with no enabled depth surface used to keep the previous record's flags and
+        // background_depth, and those reach Vulkan as the clear value: a pass that draws over
+        // nothing inherited whatever depth the last one left behind. Start from the disabled
+        // defaults instead - far plane for the clear, mask and unk2 set as the hardware has them.
+        render_context->record.depth_stencil_surface = {};
+        render_context->record.depth_stencil_surface.background_depth = 1.0f;
+        render_context->record.depth_stencil_surface.mask = 1;
+        render_context->record.depth_stencil_surface.unk2 = 1;
     }
     render_context->record.has_depth_stencil_store_surface = store_depth_stencil_surface && !store_depth_stencil_surface->disabled();
     if (render_context->record.has_depth_stencil_store_surface)
