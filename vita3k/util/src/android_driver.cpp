@@ -347,9 +347,12 @@ std::string g_driver_choice;
 bool g_driver_switch_relaunch_pending = false;
 int g_driver_switch_relaunch_count = 0;
 
-// A single launch must never turn into an endless relaunch chain: if a driver refuses to be opened at all,
-// the second attempt gives up and lets the launch continue with the system loader.
-constexpr int MAX_DRIVER_SWITCH_RELAUNCHES = 2;
+// A process must never turn into an endless relaunch chain. One relaunch per switch is enough, because the
+// request clears the recorded choice and the relaunched renderer therefore binds the new driver instead of
+// asking again; a chain can only form if the configuration keeps changing by itself. The budget is only there
+// to stop something pathological, so it sits far above any real testing session: switching between three
+// installed drivers a few times in a row stays well inside it.
+constexpr int MAX_DRIVER_SWITCH_RELAUNCHES = 8;
 
 void record_driver_choice_once(const std::string &driver_name) {
     std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
