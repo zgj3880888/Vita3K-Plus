@@ -404,15 +404,19 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
     const std::string custom_driver_name = ignore_custom_driver ? std::string() : config.current_config.custom_driver_name;
     const bool custom_driver_requested = !custom_driver_name.empty();
 
-    // A process can only ever serve one driver choice, because libadrenotools leaves every driver it opened
-    // mapped (see util/android_driver.h). Detecting that here - before a single Vulkan object exists - lets
-    // the activity restart the process, instead of failing later somewhere in surface / device / queue
-    // creation where no fallback exists and the game simply never starts.
+    // A driver is loaded by patching the process, so resolving a different one on top of an already patched
+    // process is what breaks surface / device / queue creation further down, where no fallback exists and the
+    // game simply never starts. Detecting it here - before a single Vulkan object exists - lets the session
+    // loop relaunch the same game in-process, which tears this renderer down first and resolves the newly
+    // configured driver from a clean slate. That is the same relaunch the stock restart-app button performs,
+    // so no process kill is involved.
     // ignore_custom_driver marks the system-driver retry after a failed custom-driver create; that retry
     // belongs to the same choice and must not be mistaken for a switch.
     if (!ignore_custom_driver && android_driver::is_driver_switch_pending(custom_driver_name)) {
-        android_driver::relaunch_process_for_driver_switch(custom_driver_name);
-        return false;
+        if (android_driver::request_driver_switch_relaunch(custom_driver_name))
+            return false;
+        // The relaunch budget for this launch is spent; keep whatever driver this process already resolved
+        // rather than restarting forever.
     }
 
     // Bind the process to this choice only now that a renderer is really being created. Probing a driver

@@ -87,9 +87,6 @@ public class Emulator extends SDLActivity
     static final int FOLDER_DIALOG_CODE = 546;
     static final int FOLDER_ACCESS_SETTINGS_CODE = 547;
     static final int FOLDER_ACCESS_PERMISSION_CODE = 548;
-    private static final int RELAUNCH_REQUEST_CODE = 549;
-    private static final String EXTRA_RELAUNCH_COUNT = "relaunch_count";
-    private static final int MAX_RELAUNCH_ATTEMPTS = 3;
     public interface ImagePathResultCallback {
         void onResult(String path);
     }
@@ -809,69 +806,6 @@ public class Emulator extends SDLActivity
                 ? new String[]{exec_args}
                 : new String[0];
         requestNativeRelaunch(app_path, exec_path, guestArgs, !exec_path.isEmpty());
-    }
-
-    /**
-     * Restart the whole process and reopen the current game.
-     *
-     * A custom Vulkan driver is installed through libadrenotools, which stores the loaded driver in a
-     * process-wide hook table and never unloads the previous .so (the library has no close entry point).
-     * {@link #restartApp} only pushes SDL_EVENT_QUIT and relaunches in-process, so after a driver change the
-     * old and the new driver stay mapped together. The next VkInstance / surface / present-queue creation
-     * then fails and the game never starts while the emulator UI stays alive. Killing the process first is
-     * the only way to drop the previously mapped driver.
-     *
-     * Called both from the pause menu (an explicit driver change) and from the native renderer, which
-     * refuses to start when the configured driver is not the one this process already bound to.
-     */
-    @Keep
-    public void relaunchProcess(String titleId) {
-        final String launchTitleId = titleId != null && !titleId.isEmpty() ? titleId : currentGameId;
-        final String gameTitle = getIntent() != null
-                ? getIntent().getStringExtra(EXTRA_GAME_TITLE)
-                : null;
-
-        // Loop guard. A relaunch that does not settle the driver choice must not repeat forever: refuse
-        // after a few attempts and let the game launch fail with the emulator still usable.
-        final int attempts = getIntent() != null ? getIntent().getIntExtra(EXTRA_RELAUNCH_COUNT, 0) : 0;
-        if (attempts >= MAX_RELAUNCH_ATTEMPTS) {
-            Log.e(TAG, "Refusing another process relaunch: the driver choice already restarted the app "
-                    + attempts + " times without settling");
-            return;
-        }
-
-        try {
-            Intent relaunch = createLaunchIntent(getApplicationContext(), launchTitleId, gameTitle);
-            relaunch.removeFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            // Keep whatever is below us (the game list) so back still returns to it once the process is back.
-            relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            relaunch.putExtra(EXTRA_RELAUNCH_COUNT, attempts + 1);
-
-            android.app.PendingIntent pending = android.app.PendingIntent.getActivity(
-                    getApplicationContext(),
-                    RELAUNCH_REQUEST_CODE,
-                    relaunch,
-                    android.app.PendingIntent.FLAG_CANCEL_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE);
-
-            android.app.AlarmManager alarmManager =
-                    (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
-            if (alarmManager == null) {
-                Log.w(TAG, "No AlarmManager available, falling back to an in-process restart");
-                restartApp(launchTitleId, "", "");
-                return;
-            }
-            // set() needs no permission; a few hundred ms is enough for the process to be gone.
-            alarmManager.set(android.app.AlarmManager.ELAPSED_REALTIME,
-                    SystemClock.elapsedRealtime() + 500L, pending);
-
-            Log.i(TAG, "Relaunching the process so the custom Vulkan driver is loaded into a fresh process");
-            // Deliberately no finishAndRemoveTask(): keeping the task record lets the PendingIntent above
-            // rebuild this activity on top of the game list, so back still returns there afterwards.
-            android.os.Process.killProcess(android.os.Process.myPid());
-        } catch (Throwable error) {
-            Log.w(TAG, "Process relaunch failed, falling back to an in-process restart", error);
-            restartApp(launchTitleId, "", "");
-        }
     }
 
     @Keep

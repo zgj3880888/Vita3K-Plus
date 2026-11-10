@@ -831,9 +831,9 @@ Java_org_vita3k_emulator_NativeLib_getSupportedMemoryMappingMask(JNIEnv *env, jc
     if (custom_driver_name.empty())
         return static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv()));
 
-    // Probing here would have to load a driver into a process that already loaded another one. Two Vulkan
-    // implementations on the same KGSL device is what crashes the emulator, so report the driver this process
-    // is actually running and let the restart the launch performs do the real probe in a fresh process.
+    // Probing here would have to load a driver into a process that already resolved another one, which means
+    // patching an already patched process - the state that crashes the emulator. Report the driver this
+    // process is actually running instead and let the launch settle the choice with a clean renderer.
     if (android_driver::is_driver_switch_pending(custom_driver_name))
         return static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv()));
 
@@ -861,7 +861,7 @@ Java_org_vita3k_emulator_NativeLib_getCustomDriverSupportInfo(JNIEnv *env, jclas
     // Same reason as getSupportedMemoryMappingMask: a pending switch cannot be probed in this process without
     // overlaying a second Vulkan driver on the live one. Report "loaded" for the choice the user just made so
     // the settings page keeps it instead of coercing it back to the system driver, and leave the real verdict
-    // to the fresh process that the launch restarts into.
+    // to the relaunched renderer that the launch settles into.
     if (android_driver::is_driver_switch_pending(custom_driver_name)) {
         jint values[2] = {
             static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv())),

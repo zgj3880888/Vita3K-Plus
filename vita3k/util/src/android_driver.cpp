@@ -330,17 +330,26 @@ std::optional<DriverFingerprint> get_default_driver_fingerprint() {
     return cached_fingerprint;
 }
 
-// The driver choice this process is stuck with. Recorded once and never overwritten, because libadrenotools
-// cannot unload whatever it already opened.
+// The driver choice this process resolved the last time it built a renderer.
 //
 // It must only ever be recorded when a renderer is really created, never when a driver is merely probed:
 // enumerate_vulkan_devices() runs at startup and from the settings page with an empty driver name, so
 // recording from there bound the process to "system" before the game's own config was even read, and every
 // later launch with a custom driver then looked like a switch and restarted the process in a loop.
+//
+// Unlike an earlier revision this is cleared when a switch is detected. libadrenotools loads a driver by
+// patching the process, which cannot be undone, but it can be redone for another driver: the relaunch tears
+// the old renderer down first, so resolution starts from a clean slate instead of tripping the same mismatch
+// on every iteration.
 std::mutex g_driver_choice_mutex;
 bool g_driver_choice_recorded = false;
 std::string g_driver_choice;
-std::string g_launch_title_id;
+bool g_driver_switch_relaunch_pending = false;
+int g_driver_switch_relaunch_count = 0;
+
+// A single launch must never turn into an endless relaunch chain: if a driver refuses to be opened at all,
+// the second attempt gives up and lets the launch continue with the system loader.
+constexpr int MAX_DRIVER_SWITCH_RELAUNCHES = 2;
 
 void record_driver_choice_once(const std::string &driver_name) {
     std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
@@ -351,7 +360,7 @@ void record_driver_choice_once(const std::string &driver_name) {
     g_driver_choice = driver_name;
 
     const std::string label = driver_name.empty() ? std::string("system") : driver_name;
-    LOG_INFO("This process is bound to the {} Vulkan driver from now on; picking a different driver needs a process restart", label);
+    LOG_INFO("This process resolved the {} Vulkan driver; switching to another one relaunches the session in-process", label);
 }
 
 bool driver_is_bound() {
@@ -459,55 +468,37 @@ void bind_driver_for_this_process(const std::string &driver_name) {
     record_driver_choice_once(driver_name);
 }
 
-void set_current_launch_title_id(std::string title_id) {
+bool request_driver_switch_relaunch(const std::string &requested_driver) {
+    const std::string requested_label = requested_driver.empty() ? "system" : requested_driver;
+
     std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
-    g_launch_title_id = std::move(title_id);
+    const std::string loaded_label = g_driver_choice.empty() ? std::string("system") : g_driver_choice;
+
+    if (g_driver_switch_relaunch_count >= MAX_DRIVER_SWITCH_RELAUNCHES) {
+        LOG_ERROR("Already relaunched the session {} times to switch from driver '{}' to '{}'; giving up and continuing with the system loader",
+            g_driver_switch_relaunch_count, loaded_label, requested_label);
+        return false;
+    }
+
+    ++g_driver_switch_relaunch_count;
+    g_driver_switch_relaunch_pending = true;
+    // Cleared, not overwritten: the relaunch resolves the configured driver from scratch, so recording it here
+    // would leave the next create() free to keep the mismatch. The relaunch itself binds the new choice.
+    g_driver_choice_recorded = false;
+    g_driver_choice.clear();
+
+    LOG_INFO("This process resolved driver '{}' but '{}' is configured; relaunching the session in-process so the new choice is resolved by a fresh renderer",
+        loaded_label, requested_label);
+    return true;
 }
 
-bool relaunch_process_for_driver_switch(const std::string &requested_driver) {
-    const std::string requested_label = requested_driver.empty() ? "system" : requested_driver;
-    std::string loaded_driver;
-    std::string title_id;
-    {
-        std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
-        loaded_driver = g_driver_choice;
-        title_id = g_launch_title_id;
-    }
-    const std::string loaded_label = loaded_driver.empty() ? "system" : loaded_driver;
-
-    JNIEnv *env = reinterpret_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
-    jobject activity = reinterpret_cast<jobject>(SDL_GetAndroidActivity());
-    if (!env || !activity) {
-        LOG_ERROR("Cannot restart the process to switch from driver '{}' to '{}': no Android activity", loaded_label, requested_label);
+bool consume_driver_switch_relaunch_request() {
+    std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
+    if (!g_driver_switch_relaunch_pending)
         return false;
-    }
 
-    jclass clazz = env->GetObjectClass(activity);
-    jmethodID relaunch = clazz ? env->GetMethodID(clazz, "relaunchProcess", "(Ljava/lang/String;)V") : nullptr;
-    if (!relaunch) {
-        LOG_ERROR("Cannot restart the process to switch from driver '{}' to '{}': the activity has no relaunchProcess(String)", loaded_label, requested_label);
-        if (clazz)
-            env->DeleteLocalRef(clazz);
-        env->DeleteLocalRef(activity);
-        return false;
-    }
-
-    LOG_INFO("This process already loaded driver '{}' but '{}' is configured; restarting the process so the new choice is loaded into a fresh one", loaded_label, requested_label);
-
-    jstring j_title_id = env->NewStringUTF(title_id.c_str());
-    env->CallVoidMethod(activity, relaunch, j_title_id);
-    // The Java side kills the process from here, so this normally never returns. It does return when the
-    // activity declined and fell back to an in-process restart, in which case the launch has to fail.
-    const bool threw = env->ExceptionCheck() != JNI_FALSE;
-    if (threw) {
-        env->ExceptionDescribe();
-        env->ExceptionClear();
-    }
-    if (j_title_id)
-        env->DeleteLocalRef(j_title_id);
-    env->DeleteLocalRef(clazz);
-    env->DeleteLocalRef(activity);
-    return !threw;
+    g_driver_switch_relaunch_pending = false;
+    return true;
 }
 
 } // namespace android_driver
@@ -593,9 +584,9 @@ void *open_custom_vulkan_driver(const std::string &driver_name) {
         g_driver_handles.emplace(driver_name, vulkan_handle);
     }
 
-    // Whatever opens a driver first owns the process from then on, including a settings-page probe: the probe
-    // has already patched the process, so a later, different choice has to go through a restart as well.
-    android_driver::bind_driver_for_this_process(driver_name);
+    // No bind here on purpose: binding is what decides whether the configured driver still matches this
+    // process, so it belongs to VKState::create(), which is the only place that acts on the answer. A
+    // settings-page probe must never decide it, or the next launch looks like a switch on every start.
 
     return vulkan_handle;
 }
@@ -606,12 +597,11 @@ namespace android_driver {
 PFN_vkGetInstanceProcAddr resolve_vk_get_instance_proc_addr(const std::string &driver_name) {
 #ifdef USE_ADRENO_TOOLS
     if (!driver_name.empty()) {
-        // A process that already opened one driver must not open a second one: two Vulkan implementations
-        // mapping the same KGSL device at once is exactly the state that fails to create a swapchain or a
-        // present queue. The switch is done by restarting the process, so here the safe answer is the system
-        // loader, and create() has already asked for the restart before ever getting this far.
+        // Once a driver is bound to this process, opening a second one means patching an already patched
+        // process, which is what broke swapchain and queue creation. create() asks for the in-process relaunch
+        // before ever getting this far, and that relaunch clears the binding, so this only catches probes.
         if (is_driver_switch_pending(driver_name)) {
-            LOG_INFO("Not opening custom driver '{}' in this process because it is bound to another driver; restarting is what switches it", driver_name);
+            LOG_INFO("Not opening custom driver '{}' in this process because it already resolved another driver; the session relaunch is what switches it", driver_name);
             return load_system_vk_get_instance_proc_addr();
         }
 

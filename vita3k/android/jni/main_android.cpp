@@ -295,10 +295,6 @@ SDLMAIN_DECLSPEC int SDL_main(int argc, char *argv[]) {
     };
 
     const auto sync_current_game_id = [](const std::string &game_id) {
-        // Remembered here rather than read back from Java: the renderer may have to restart the process
-        // before the activity has processed setCurrentGameId(), and the relaunch has to reopen this game.
-        android_driver::set_current_launch_title_id(game_id);
-
         JNIEnv *jni_env = reinterpret_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
         jobject activity = reinterpret_cast<jobject>(SDL_GetAndroidActivity());
         if (!jni_env || !activity)
@@ -441,31 +437,45 @@ SDLMAIN_DECLSPEC int SDL_main(int argc, char *argv[]) {
                 LOG_WARN("Failed to set OpenGL ES swap interval: {}", SDL_GetError());
         }
 
+        bool session_ready = true;
         if (!session_controller->initialize_renderer(frame_host)) {
-            LOG_ERROR("Failed to initialise renderer.");
-            exit_code = -1;
-            cleanup_launch(app::AppSessionStopReason::LaunchFailure);
-            break;
+            if (android_driver::consume_driver_switch_relaunch_request()) {
+                // The renderer refused to build because another Vulkan driver is configured now than the one
+                // this process already resolved. Reuse the in-process relaunch: the renderer is gone, so the
+                // next iteration resolves the configured driver from a clean slate instead of failing for
+                // good. Same game, same request - the user only picked a different driver.
+                LOG_INFO("Relaunching in-process because the configured Vulkan driver changed");
+                pending_launch_request = launch_request;
+                session_ready = false;
+            } else {
+                LOG_ERROR("Failed to initialise renderer.");
+                exit_code = -1;
+                cleanup_launch(app::AppSessionStopReason::LaunchFailure);
+                break;
+            }
         }
 
-        if (!session_controller->initialize_runtime()) {
-            LOG_ERROR("Failed late initialisation.");
-            exit_code = -1;
-            cleanup_launch(app::AppSessionStopReason::LaunchFailure);
-            break;
+        if (session_ready) {
+            if (!session_controller->initialize_runtime()) {
+                LOG_ERROR("Failed late initialisation.");
+                exit_code = -1;
+                cleanup_launch(app::AppSessionStopReason::LaunchFailure);
+                break;
+            }
+
+            if (!session_controller->load_and_run()) {
+                LOG_ERROR("Failed to load or start the app session.");
+                exit_code = -1;
+                cleanup_launch(app::AppSessionStopReason::LaunchFailure);
+                break;
+            }
+
+            if (auto request = emuenv->take_app_launch_request())
+                pending_launch_request = std::move(request);
+
+            LOG_INFO("Game started: {} ({})", emuenv->current_app_title, launch_request.app_path);
         }
 
-        if (!session_controller->load_and_run()) {
-            LOG_ERROR("Failed to load or start the app session.");
-            exit_code = -1;
-            cleanup_launch(app::AppSessionStopReason::LaunchFailure);
-            break;
-        }
-
-        if (auto request = emuenv->take_app_launch_request())
-            pending_launch_request = std::move(request);
-
-        LOG_INFO("Game started: {} ({})", emuenv->current_app_title, launch_request.app_path);
         app::LaunchRuntimeMetrics runtime_metrics{};
 
         bool running = !pending_launch_request.has_value();
