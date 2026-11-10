@@ -22,6 +22,7 @@
 #include <cctype>
 #include <cstring>
 #include <fstream>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -329,8 +330,13 @@ std::optional<DriverFingerprint> get_default_driver_fingerprint() {
     return cached_fingerprint;
 }
 
-// The driver choice this process was first asked to resolve. Recorded once and never overwritten, because
-// libadrenotools cannot unload whatever it already opened: the first choice is what the process is stuck with.
+// The driver choice this process is stuck with. Recorded once and never overwritten, because libadrenotools
+// cannot unload whatever it already opened.
+//
+// It must only ever be recorded when a renderer is really created, never when a driver is merely probed:
+// enumerate_vulkan_devices() runs at startup and from the settings page with an empty driver name, so
+// recording from there bound the process to "system" before the game's own config was even read, and every
+// later launch with a custom driver then looked like a switch and restarted the process in a loop.
 std::mutex g_driver_choice_mutex;
 bool g_driver_choice_recorded = false;
 std::string g_driver_choice;
@@ -346,6 +352,11 @@ void record_driver_choice_once(const std::string &driver_name) {
 
     const std::string label = driver_name.empty() ? std::string("system") : driver_name;
     LOG_INFO("This process is bound to the {} Vulkan driver from now on; picking a different driver needs a process restart", label);
+}
+
+bool driver_is_bound() {
+    std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
+    return g_driver_choice_recorded;
 }
 
 } // namespace
@@ -440,6 +451,14 @@ bool is_driver_switch_pending(const std::string &requested_driver) {
     return g_driver_choice_recorded && g_driver_choice != requested_driver;
 }
 
+bool is_driver_bound_to_this_process() {
+    return driver_is_bound();
+}
+
+void bind_driver_for_this_process(const std::string &driver_name) {
+    record_driver_choice_once(driver_name);
+}
+
 void set_current_launch_title_id(std::string title_id) {
     std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
     g_launch_title_id = std::move(title_id);
@@ -494,7 +513,26 @@ bool relaunch_process_for_driver_switch(const std::string &requested_driver) {
 } // namespace android_driver
 
 #ifdef USE_ADRENO_TOOLS
+namespace {
+// adrenotools_open_libvulkan installs a process-wide bionic hook table the first time it is called and offers
+// no way to undo it. Calling it a second time for a driver that is already open re-runs that installation on
+// an already patched process, which is what made "pick a driver in the settings page, then open the settings
+// page again" crash the emulator: the settings page probes the driver, the renderer opens it, the settings
+// page opens it again. One handle per driver, reused for the lifetime of the process.
+std::mutex g_driver_handle_mutex;
+std::map<std::string, void *> g_driver_handles;
+} // namespace
+
 void *open_custom_vulkan_driver(const std::string &driver_name) {
+    {
+        std::lock_guard<std::mutex> lock(g_driver_handle_mutex);
+        const auto cached = g_driver_handles.find(driver_name);
+        if (cached != g_driver_handles.end()) {
+            LOG_INFO("Reusing the already opened handle for custom driver {}", driver_name);
+            return cached->second;
+        }
+    }
+
     JNIEnv *env = reinterpret_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
     const auto files_dir = get_android_files_dir(env);
     if (!files_dir)
@@ -550,6 +588,15 @@ void *open_custom_vulkan_driver(const std::string &driver_name) {
         return nullptr;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(g_driver_handle_mutex);
+        g_driver_handles.emplace(driver_name, vulkan_handle);
+    }
+
+    // Whatever opens a driver first owns the process from then on, including a settings-page probe: the probe
+    // has already patched the process, so a later, different choice has to go through a restart as well.
+    android_driver::bind_driver_for_this_process(driver_name);
+
     return vulkan_handle;
 }
 #endif
@@ -557,12 +604,17 @@ void *open_custom_vulkan_driver(const std::string &driver_name) {
 namespace android_driver {
 
 PFN_vkGetInstanceProcAddr resolve_vk_get_instance_proc_addr(const std::string &driver_name) {
-    // Recorded on the requested name, not on the one that ended up working: if a driver cannot be opened at
-    // all, retrying the same one must not keep restarting the process.
-    record_driver_choice_once(driver_name);
-
 #ifdef USE_ADRENO_TOOLS
     if (!driver_name.empty()) {
+        // A process that already opened one driver must not open a second one: two Vulkan implementations
+        // mapping the same KGSL device at once is exactly the state that fails to create a swapchain or a
+        // present queue. The switch is done by restarting the process, so here the safe answer is the system
+        // loader, and create() has already asked for the restart before ever getting this far.
+        if (is_driver_switch_pending(driver_name)) {
+            LOG_INFO("Not opening custom driver '{}' in this process because it is bound to another driver; restarting is what switches it", driver_name);
+            return load_system_vk_get_instance_proc_addr();
+        }
+
         void *vulkan_handle = open_custom_vulkan_driver(driver_name);
         if (!vulkan_handle) {
             LOG_WARN("Failed to load custom driver {}; falling back to the system Vulkan loader", driver_name);

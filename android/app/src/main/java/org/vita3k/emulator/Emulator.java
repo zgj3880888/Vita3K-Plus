@@ -88,6 +88,8 @@ public class Emulator extends SDLActivity
     static final int FOLDER_ACCESS_SETTINGS_CODE = 547;
     static final int FOLDER_ACCESS_PERMISSION_CODE = 548;
     private static final int RELAUNCH_REQUEST_CODE = 549;
+    private static final String EXTRA_RELAUNCH_COUNT = "relaunch_count";
+    private static final int MAX_RELAUNCH_ATTEMPTS = 3;
     public interface ImagePathResultCallback {
         void onResult(String path);
     }
@@ -828,11 +830,22 @@ public class Emulator extends SDLActivity
         final String gameTitle = getIntent() != null
                 ? getIntent().getStringExtra(EXTRA_GAME_TITLE)
                 : null;
+
+        // Loop guard. A relaunch that does not settle the driver choice must not repeat forever: refuse
+        // after a few attempts and let the game launch fail with the emulator still usable.
+        final int attempts = getIntent() != null ? getIntent().getIntExtra(EXTRA_RELAUNCH_COUNT, 0) : 0;
+        if (attempts >= MAX_RELAUNCH_ATTEMPTS) {
+            Log.e(TAG, "Refusing another process relaunch: the driver choice already restarted the app "
+                    + attempts + " times without settling");
+            return;
+        }
+
         try {
             Intent relaunch = createLaunchIntent(getApplicationContext(), launchTitleId, gameTitle);
             relaunch.removeFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             // Keep whatever is below us (the game list) so back still returns to it once the process is back.
             relaunch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            relaunch.putExtra(EXTRA_RELAUNCH_COUNT, attempts + 1);
 
             android.app.PendingIntent pending = android.app.PendingIntent.getActivity(
                     getApplicationContext(),

@@ -414,6 +414,13 @@ bool VKState::create(std::unique_ptr<renderer::State> &state, const Config &conf
         android_driver::relaunch_process_for_driver_switch(custom_driver_name);
         return false;
     }
+
+    // Bind the process to this choice only now that a renderer is really being created. Probing a driver
+    // (enumerate_vulkan_devices from the settings page, or the plain startup enumeration with an empty name)
+    // must never bind the process, or the game's own configured driver would look like a switch on the very
+    // first launch and restart the process forever.
+    if (!ignore_custom_driver)
+        android_driver::bind_driver_for_this_process(custom_driver_name);
 #endif
 
     {

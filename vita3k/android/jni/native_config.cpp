@@ -27,6 +27,7 @@
 #include <lang/state.h>
 #include <renderer/functions.h>
 #include <renderer/state.h>
+#include <util/android_driver.h>
 #include <util/log.h>
 
 #include <SDL3/SDL_gamepad.h>
@@ -830,6 +831,12 @@ Java_org_vita3k_emulator_NativeLib_getSupportedMemoryMappingMask(JNIEnv *env, jc
     if (custom_driver_name.empty())
         return static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv()));
 
+    // Probing here would have to load a driver into a process that already loaded another one. Two Vulkan
+    // implementations on the same KGSL device is what crashes the emulator, so report the driver this process
+    // is actually running and let the restart the launch performs do the real probe in a fresh process.
+    if (android_driver::is_driver_switch_pending(custom_driver_name))
+        return static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv()));
+
     const auto device_info = renderer::enumerate_vulkan_devices(custom_driver_name);
     if (device_info.mapping_method_masks.empty())
         return static_cast<jint>(1 << 0);
@@ -844,6 +851,21 @@ Java_org_vita3k_emulator_NativeLib_getCustomDriverSupportInfo(JNIEnv *env, jclas
         jint values[2] = {
             static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv())),
             0
+        };
+
+        jintArray result = env->NewIntArray(2);
+        env->SetIntArrayRegion(result, 0, 2, values);
+        return result;
+    }
+
+    // Same reason as getSupportedMemoryMappingMask: a pending switch cannot be probed in this process without
+    // overlaying a second Vulkan driver on the live one. Report "loaded" for the choice the user just made so
+    // the settings page keeps it instead of coercing it back to the system driver, and leave the real verdict
+    // to the fresh process that the launch restarts into.
+    if (android_driver::is_driver_switch_pending(custom_driver_name)) {
+        jint values[2] = {
+            static_cast<jint>(get_default_supported_memory_mapping_mask(get_emuenv())),
+            1
         };
 
         jintArray result = env->NewIntArray(2);
