@@ -27,6 +27,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -328,6 +329,25 @@ std::optional<DriverFingerprint> get_default_driver_fingerprint() {
     return cached_fingerprint;
 }
 
+// The driver choice this process was first asked to resolve. Recorded once and never overwritten, because
+// libadrenotools cannot unload whatever it already opened: the first choice is what the process is stuck with.
+std::mutex g_driver_choice_mutex;
+bool g_driver_choice_recorded = false;
+std::string g_driver_choice;
+std::string g_launch_title_id;
+
+void record_driver_choice_once(const std::string &driver_name) {
+    std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
+    if (g_driver_choice_recorded)
+        return;
+
+    g_driver_choice_recorded = true;
+    g_driver_choice = driver_name;
+
+    const std::string label = driver_name.empty() ? std::string("system") : driver_name;
+    LOG_INFO("This process is bound to the {} Vulkan driver from now on; picking a different driver needs a process restart", label);
+}
+
 } // namespace
 
 namespace android_driver {
@@ -415,6 +435,62 @@ bool is_custom_driver_loaded(const std::string &driver_name, uint32_t vendor_id,
     return library_path && is_library_mapped(*library_path);
 }
 
+bool is_driver_switch_pending(const std::string &requested_driver) {
+    std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
+    return g_driver_choice_recorded && g_driver_choice != requested_driver;
+}
+
+void set_current_launch_title_id(std::string title_id) {
+    std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
+    g_launch_title_id = std::move(title_id);
+}
+
+bool relaunch_process_for_driver_switch(const std::string &requested_driver) {
+    const std::string requested_label = requested_driver.empty() ? "system" : requested_driver;
+    std::string loaded_driver;
+    std::string title_id;
+    {
+        std::lock_guard<std::mutex> lock(g_driver_choice_mutex);
+        loaded_driver = g_driver_choice;
+        title_id = g_launch_title_id;
+    }
+    const std::string loaded_label = loaded_driver.empty() ? "system" : loaded_driver;
+
+    JNIEnv *env = reinterpret_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+    jobject activity = reinterpret_cast<jobject>(SDL_GetAndroidActivity());
+    if (!env || !activity) {
+        LOG_ERROR("Cannot restart the process to switch from driver '{}' to '{}': no Android activity", loaded_label, requested_label);
+        return false;
+    }
+
+    jclass clazz = env->GetObjectClass(activity);
+    jmethodID relaunch = clazz ? env->GetMethodID(clazz, "relaunchProcess", "(Ljava/lang/String;)V") : nullptr;
+    if (!relaunch) {
+        LOG_ERROR("Cannot restart the process to switch from driver '{}' to '{}': the activity has no relaunchProcess(String)", loaded_label, requested_label);
+        if (clazz)
+            env->DeleteLocalRef(clazz);
+        env->DeleteLocalRef(activity);
+        return false;
+    }
+
+    LOG_INFO("This process already loaded driver '{}' but '{}' is configured; restarting the process so the new choice is loaded into a fresh one", loaded_label, requested_label);
+
+    jstring j_title_id = env->NewStringUTF(title_id.c_str());
+    env->CallVoidMethod(activity, relaunch, j_title_id);
+    // The Java side kills the process from here, so this normally never returns. It does return when the
+    // activity declined and fell back to an in-process restart, in which case the launch has to fail.
+    const bool threw = env->ExceptionCheck() != JNI_FALSE;
+    if (threw) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+    }
+    if (j_title_id)
+        env->DeleteLocalRef(j_title_id);
+    env->DeleteLocalRef(clazz);
+    env->DeleteLocalRef(activity);
+    return !threw;
+}
+
 } // namespace android_driver
 
 #ifdef USE_ADRENO_TOOLS
@@ -481,6 +557,10 @@ void *open_custom_vulkan_driver(const std::string &driver_name) {
 namespace android_driver {
 
 PFN_vkGetInstanceProcAddr resolve_vk_get_instance_proc_addr(const std::string &driver_name) {
+    // Recorded on the requested name, not on the one that ended up working: if a driver cannot be opened at
+    // all, retrying the same one must not keep restarting the process.
+    record_driver_choice_once(driver_name);
+
 #ifdef USE_ADRENO_TOOLS
     if (!driver_name.empty()) {
         void *vulkan_handle = open_custom_vulkan_driver(driver_name);

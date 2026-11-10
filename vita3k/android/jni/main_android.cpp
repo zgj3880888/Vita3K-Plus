@@ -32,6 +32,7 @@
 #include <renderer/state.h>
 #include <renderer/vulkan/screen_renderer.h>
 #include <touch/functions.h>
+#include <util/android_driver.h>
 #include <util/log.h>
 #include <util/string_utils.h>
 
@@ -294,6 +295,10 @@ SDLMAIN_DECLSPEC int SDL_main(int argc, char *argv[]) {
     };
 
     const auto sync_current_game_id = [](const std::string &game_id) {
+        // Remembered here rather than read back from Java: the renderer may have to restart the process
+        // before the activity has processed setCurrentGameId(), and the relaunch has to reopen this game.
+        android_driver::set_current_launch_title_id(game_id);
+
         JNIEnv *jni_env = reinterpret_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
         jobject activity = reinterpret_cast<jobject>(SDL_GetAndroidActivity());
         if (!jni_env || !activity)

@@ -817,7 +817,10 @@ public class Emulator extends SDLActivity
      * {@link #restartApp} only pushes SDL_EVENT_QUIT and relaunches in-process, so after a driver change the
      * old and the new driver stay mapped together. The next VkInstance / surface / present-queue creation
      * then fails and the game never starts while the emulator UI stays alive. Killing the process first is
-     * the only way to drop the previously mapped driver, so driver changes take this path instead.
+     * the only way to drop the previously mapped driver.
+     *
+     * Called both from the pause menu (an explicit driver change) and from the native renderer, which
+     * refuses to start when the configured driver is not the one this process already bound to.
      */
     @Keep
     public void relaunchProcess(String titleId) {
