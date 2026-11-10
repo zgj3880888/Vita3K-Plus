@@ -849,7 +849,8 @@ public class Emulator extends SDLActivity
                     SystemClock.elapsedRealtime() + 500L, pending);
 
             Log.i(TAG, "Relaunching the process so the custom Vulkan driver is loaded into a fresh process");
-            finishAndRemoveTask();
+            // Deliberately no finishAndRemoveTask(): keeping the task record lets the PendingIntent above
+            // rebuild this activity on top of the game list, so back still returns there afterwards.
             android.os.Process.killProcess(android.os.Process.myPid());
         } catch (Throwable error) {
             Log.w(TAG, "Process relaunch failed, falling back to an in-process restart", error);
