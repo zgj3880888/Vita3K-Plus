@@ -203,8 +203,52 @@ bool init_savedata_app_path(IOState &io, const fs::path &vita_fs_path) {
 
     boost::system::error_code ec;
     fs::create_directories(user_id_path, ec);
+    if (ec)
+        LOG_ERROR("[SAVEDATA-PROBE] could not create {}: {}", user_id_path, ec.message());
+    ec.clear();
     fs::create_directories(savedata_path, ec);
+    if (ec)
+        LOG_ERROR("[SAVEDATA-PROBE] could not create {}: {}", savedata_path, ec.message());
+    ec.clear();
     fs::create_directories(savedata_game_path, ec);
+    if (ec)
+        LOG_ERROR("[SAVEDATA-PROBE] could not create {}: {}", savedata_game_path, ec.message());
+
+    // the game's save dialog only opens when this directory exists and is writable, so report what is really there
+    const bool game_dir_exists = fs::is_directory(savedata_game_path);
+    const bool user_dir_exists = fs::is_directory(user_id_path);
+    LOG_INFO("[SAVEDATA-PROBE] user_id='{}' savedata='{}' user_dir={} game_dir={} game_dir_path={}",
+        io.user_id, io.savedata, user_dir_exists, game_dir_exists, savedata_game_path.string());
+    if (game_dir_exists) {
+        boost::system::error_code list_ec;
+        std::vector<std::string> entries;
+        for (fs::directory_iterator it(savedata_game_path, list_ec), end; !list_ec && it != end; it.increment(list_ec)) {
+            const auto &entry = *it;
+            std::string line = entry.path().filename().string();
+            boost::system::error_code size_ec;
+            if (fs::is_regular_file(entry.path(), size_ec))
+                line += " (" + std::to_string(static_cast<long long>(fs::file_size(entry.path(), size_ec))) + " B)";
+            else if (fs::is_directory(entry.path(), size_ec))
+                line += " (dir)";
+            entries.push_back(line);
+        }
+        if (list_ec)
+            LOG_ERROR("[SAVEDATA-PROBE] could not list {}: {}", savedata_game_path, list_ec.message());
+        LOG_INFO("[SAVEDATA-PROBE] {} entries in {}", entries.size(), savedata_game_path.string());
+        for (const auto &entry : entries)
+            LOG_INFO("[SAVEDATA-PROBE]   {}", entry);
+    } else {
+        LOG_WARN("[SAVEDATA-PROBE] the save directory of {} does not exist, the game's save dialog can never open", io.savedata);
+    }
+
+    // ux0/user is where time.xml lives; a failing write there usually means the same thing broke the save path
+    const fs::path ux0_user_path{ vita_fs_path / "ux0" / "user" };
+    boost::system::error_code user_ec;
+    LOG_INFO("[SAVEDATA-PROBE] ux0/user exists={} ({}), ux0 exists={} ({})",
+        fs::is_directory(ux0_user_path, user_ec), ux0_user_path.string(),
+        fs::is_directory(vita_fs_path / "ux0", user_ec), (vita_fs_path / "ux0").string());
+    if (user_ec)
+        LOG_ERROR("[SAVEDATA-PROBE] probing ux0/user failed: {}", user_ec.message());
 
     return true;
 }

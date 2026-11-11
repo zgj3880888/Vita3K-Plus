@@ -1125,6 +1125,10 @@ EXPORT(int, sceSaveDataDialogContinue, const SceSaveDataDialogParam *p) {
         return RET_ERROR(SCE_COMMON_DIALOG_ERROR_NULL);
     }
 
+    LOG_INFO("[SAVEDATA-PROBE] sceSaveDataDialogContinue entered: type={} status={} substatus={} (SAVEDATA_DIALOG={}, RUNNING={}, FINISHED={})",
+        static_cast<int>(emuenv.common_dialog.type), static_cast<int>(emuenv.common_dialog.status), static_cast<int>(emuenv.common_dialog.substatus),
+        static_cast<int>(SAVEDATA_DIALOG), static_cast<int>(SCE_COMMON_DIALOG_STATUS_RUNNING), static_cast<int>(SCE_COMMON_DIALOG_STATUS_FINISHED));
+
     if (emuenv.common_dialog.type != SAVEDATA_DIALOG || emuenv.common_dialog.status != SCE_COMMON_DIALOG_STATUS_RUNNING) {
         return RET_ERROR(SCE_COMMON_DIALOG_ERROR_NOT_RUNNING);
     }
@@ -1335,11 +1339,15 @@ static void initialize_savedata_vectors(EmuEnvState &emuenv, unsigned int size) 
 
 EXPORT(int, sceSaveDataDialogInit, const SceSaveDataDialogParam *p) {
     TRACY_FUNC(sceSaveDataDialogInit, p);
+    LOG_INFO("[SAVEDATA-PROBE] sceSaveDataDialogInit entered: p={} current type={} status={}",
+        static_cast<const void *>(p), static_cast<int>(emuenv.common_dialog.type), static_cast<int>(emuenv.common_dialog.status));
     if (p == nullptr) {
         return RET_ERROR(SCE_COMMON_DIALOG_ERROR_NULL);
     }
 
     if (emuenv.common_dialog.type != NO_DIALOG) {
+        LOG_WARN("[SAVEDATA-PROBE] sceSaveDataDialogInit rejected with BUSY: previous type={} status={} substatus={} was never dismissed",
+            static_cast<int>(emuenv.common_dialog.type), static_cast<int>(emuenv.common_dialog.status), static_cast<int>(emuenv.common_dialog.substatus));
         return RET_ERROR(SCE_COMMON_DIALOG_ERROR_BUSY);
     }
 
