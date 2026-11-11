@@ -169,6 +169,10 @@ struct WorldStopScope {
     WorldStopScope(renderer::State &renderer, MemState &mem, SceUID except_thread, Address addr, uint32_t size) {
         if (!enable_world_stop_for_transitions || !mem.use_page_table || !renderer.kernel)
             return;
+        // A zero-size transition has nothing to copy and nothing to protect: stopping the world
+        // for it only starves the GPU thread. It would otherwise pay a full park/resume for no work.
+        if (size == 0)
+            return;
         kernel = renderer.kernel;
         mem_state = &mem;
         const auto start = std::chrono::steady_clock::now();
@@ -230,6 +234,10 @@ static void note_memory_transition(renderer::State &renderer, const char *kind, 
 
 static void teardown_dormant(renderer::State &renderer, MemState &mem, SceUID caller_thread, Address addr, const char *why) {
     auto &vk = dynamic_cast<vulkan::VKState &>(renderer);
+    // Nothing to evict at this address: tearing down is a no-op, so paying for a world stop here
+    // just starves the GPU thread for 16 ms while holding no useful work.
+    if (!vk.dormant_mappings.contains(addr))
+        return;
     static uint64_t teardowns = 0;
     if (((++teardowns) & 63) == 1)
         LOG_INFO("[DORMANT] teardown #{} of 0x{:X} ({}); {} still dormant, {} MiB", teardowns, addr, why, vk.dormant_mappings.size(), vk.dormant_bytes / (1024 * 1024));
@@ -322,10 +330,16 @@ COMMAND(handle_memory_unmap) {
     }
 
     {
-        const WorldStopScope world_stop(renderer, mem, caller_thread, addr.address(), 0);
+        // The mapping was neither dormant nor live (make_dormant above failed), so the unmap below
+        // has nothing to remove. Stopping the world for it only delays the guest.
+        const bool have_mapping = !(DORMANT_MAPPINGS && renderer.current_backend == Backend::Vulkan)
+            || dynamic_cast<vulkan::VKState &>(renderer).mapped_memories.contains(addr.address());
+        if (have_mapping) {
+            const WorldStopScope world_stop(renderer, mem, caller_thread, addr.address(), 0);
 
-        if (renderer.current_backend == Backend::Vulkan) {
-            dynamic_cast<vulkan::VKState &>(renderer).unmap_memory(mem, addr);
+            if (renderer.current_backend == Backend::Vulkan) {
+                dynamic_cast<vulkan::VKState &>(renderer).unmap_memory(mem, addr);
+            }
         }
     }
 
