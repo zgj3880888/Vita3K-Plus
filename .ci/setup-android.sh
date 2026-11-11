@@ -5,8 +5,32 @@ android_api_level="${ANDROID_API_LEVEL:-35}"
 android_build_tools="${ANDROID_BUILD_TOOLS:-36.0.0}"
 android_ndk_version="${ANDROID_NDK_VERSION:-29.0.14206865}"
 
-sudo apt-get update
-sudo apt-get install -y ninja-build
+# -----------------------------------------------
+# ninja
+# -----------------------------------------------
+# `apt-get install ninja-build` was the original way of doing this, but the
+# GitHub runners intermittently lose DNS for archive.ubuntu.com /
+# security.ubuntu.com (packages.microsoft.com still resolves, so the box is not
+# offline, just those CNAMEs), which aborted every build with `exit code 100`.
+# Prefer whatever the image already ships, then fall back to the upstream
+# release binary, and only touch apt as a last resort.
+if command -v ninja > /dev/null; then
+    echo "ninja already present: $(command -v ninja) ($(ninja --version))"
+else
+    echo "ninja missing, fetching the upstream release binary"
+    ninja_zip="${RUNNER_TEMP:-/tmp}/ninja-linux.zip"
+    if curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+            -o "$ninja_zip" \
+            https://github.com/ninja-build/ninja/releases/download/v1.13.2/ninja-linux.zip; then
+        unzip -q -o "$ninja_zip" -d "${RUNNER_TEMP:-/tmp}/ninja-bin"
+        sudo install -m 0755 "${RUNNER_TEMP:-/tmp}/ninja-bin/ninja" /usr/local/bin/ninja
+        echo "installed from release: $(ninja --version)"
+    else
+        echo "release download failed, retrying through apt"
+        sudo apt-get update || true
+        sudo apt-get install -y ninja-build
+    fi
+fi
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
