@@ -32,6 +32,29 @@ else
     fi
 fi
 
+# -----------------------------------------------
+# ccache
+# -----------------------------------------------
+# hendrikmuhs/ccache-action installs ccache with `apt-get install -y ccache`,
+# which hits the same dead ubuntu mirrors as ninja did. Installing it here from
+# the upstream static build keeps the action from ever reaching for apt; the
+# workflow passes install: false so it just uses what we put on PATH.
+if ! command -v ccache > /dev/null; then
+    echo "ccache missing, fetching the upstream static build"
+    ccache_tgz="${RUNNER_TEMP:-/tmp}/ccache.tar.gz"
+    if curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors \
+            -o "$ccache_tgz" \
+            https://github.com/ccache/ccache/releases/download/v4.14.3/ccache-4.14.3-linux-x86_64-musl-static.tar.gz; then
+        tar -xzf "$ccache_tgz" -C "${RUNNER_TEMP:-/tmp}"
+        sudo install -m 0755 "${RUNNER_TEMP:-/tmp}"/ccache-4.14.3-linux-x86_64-musl-static/ccache /usr/local/bin/ccache
+        echo "ccache installed: $(ccache --version | head -1)"
+    else
+        echo "::warning::could not fetch ccache - the build will run without the compiler cache"
+    fi
+else
+    echo "ccache already present: $(command -v ccache)"
+fi
+
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 
 if command -v sdkmanager > /dev/null; then
