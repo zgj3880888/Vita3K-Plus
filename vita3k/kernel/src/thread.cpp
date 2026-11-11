@@ -574,6 +574,10 @@ thread_local int tls_core = -1;
 thread_local uint64_t tls_core_gen = 0;
 thread_local const ThreadState *tls_core_thread = nullptr;
 
+// [SCHED-PROBE] How many blocking transitions have been reported so far, used to
+// throttle the probe. Relaxed: it only drives log verbosity.
+std::atomic<uint64_t> sched_probe_blocks{ 0 };
+
 int64_t core_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -1852,6 +1856,21 @@ ThreadState::~ThreadState() {
 void ThreadState::update_status(ThreadStatus status, std::optional<ThreadStatus> expected) {
     if (expected)
         assert(expected.value() == this->status);
+
+    // [SCHED-PROBE] Record every blocking transition together with the core the
+    // thread was parked on. A game that freezes while every thread still looks
+    // "alive" needs exactly this: which thread went to sleep, on which core, and
+    // whether that left the core empty. Deliberately lock-free: update_status can
+    // be reached from paths that already hold g_core_mutex. Throttled, because a
+    // title that blocks thousands of times would otherwise drown the log.
+    if (status == ThreadStatus::wait && core_lock_held_by(this)) {
+        const int core = core_of(affinity_mask);
+        const uint64_t n = sched_probe_blocks.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (n <= 200 || (n % 500) == 0) {
+            LOG_INFO("[SCHED-PROBE] #{} '{}' (#{} p{}) blocks on core {} (aff 0x{:X}) while holding that core's lock",
+                n, name, id, priority, core, static_cast<uint32_t>(affinity_mask));
+        }
+    }
 
     if (status == ThreadStatus::wait && cpu && (cpu.get() == guest_sched_token_cpu() || core_lock_held_by(this)))
         guest_sched_release_for_block();
