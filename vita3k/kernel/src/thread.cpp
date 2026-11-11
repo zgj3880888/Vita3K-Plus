@@ -1858,17 +1858,19 @@ void ThreadState::update_status(ThreadStatus status, std::optional<ThreadStatus>
         assert(expected.value() == this->status);
 
     // [SCHED-PROBE] Record every blocking transition together with the core the
-    // thread was parked on. A game that freezes while every thread still looks
-    // "alive" needs exactly this: which thread went to sleep, on which core, and
-    // whether that left the core empty. Deliberately lock-free: update_status can
-    // be reached from paths that already hold g_core_mutex. Throttled, because a
-    // title that blocks thousands of times would otherwise drown the log.
+    // thread was parked on and what it is waiting for. A game that freezes while
+    // every thread still looks "alive" needs exactly this: which thread went to
+    // sleep, on which core, and what it is blocked on. Deliberately lock-free:
+    // update_status can be reached from paths that already hold g_core_mutex.
+    // Throttled, because a title that blocks thousands of times would otherwise
+    // drown the log.
     if (status == ThreadStatus::wait && core_lock_held_by(this)) {
         const int core = core_of(affinity_mask);
         const uint64_t n = sched_probe_blocks.fetch_add(1, std::memory_order_relaxed) + 1;
         if (n <= 200 || (n % 500) == 0) {
-            LOG_INFO("[SCHED-PROBE] #{} '{}' (#{} p{}) blocks on core {} (aff 0x{:X}) while holding that core's lock",
-                n, name, id, priority, core, static_cast<uint32_t>(affinity_mask));
+            LOG_INFO("[SCHED-PROBE] #{} '{}' (#{} p{}) blocks on core {} (aff 0x{:X}) waiting on {} uid=0x{:X} while holding that core's lock",
+                n, name, id, priority, core, static_cast<uint32_t>(affinity_mask),
+                wait_prim_kind ? wait_prim_kind : "unknown", static_cast<uint32_t>(wait_prim_uid));
         }
     }
 
