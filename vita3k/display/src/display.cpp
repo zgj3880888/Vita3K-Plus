@@ -236,6 +236,7 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
         // Hang watchdog - if there's no framebuffer flip for ~10s (600 vblanks) while unpaused then dump guest threads
         {
             static uint64_t last_dumped_setframe = ~0ull;
+            static uint64_t last_hang_dump_vblank = 0;
             static uint64_t last_break_vblanks = 0;
             static uint64_t last_provable_break_setframe = ~0ull;
             static uint64_t last_provable_break_vblank = 0;
@@ -336,9 +337,16 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
                     emuenv.gxm.display_entries_done.load(), emuenv.gxm.display_queue.size(), emuenv.gxm.display_worker_state.load(),
                     emuenv.renderer ? emuenv.renderer->progress_counter.load(std::memory_order_relaxed) : 0);
 
-            // Full 10s dump for diagnostics (once per distinct stall).
-            if (stall_vblanks > 600 && unpaused && last_dumped_setframe != setframe) {
+            // Re-dump while the stall persists instead of once per distinct setframe value.
+            // The per-bit history only answers "who stopped producing bit X" if we get several
+            // snapshots over the stall; one dump 25 minutes after the freeze cannot tell
+            // "never set" apart from "set during boot, then stopped".
+            constexpr uint64_t HANG_REDUMP_VBLANKS = 1800; // ~30 s
+            const bool hang_redump_due = (last_dumped_setframe == setframe)
+                && (vblanks - last_hang_dump_vblank >= HANG_REDUMP_VBLANKS);
+            if (stall_vblanks > 600 && unpaused && (last_dumped_setframe != setframe || hang_redump_due)) {
                 last_dumped_setframe = setframe; // one dump per distinct stall
+                last_hang_dump_vblank = vblanks;
                 LOG_ERROR("HANG WATCHDOG: no framebuffer flip for {} vblanks{} (renderer idle {}, guest wake-idle {}, SetFrameBuf calls={} accepted={}) — dumping guest threads",
                     stall_vblanks, never_flipped ? " (game NEVER flipped since boot)" : "", renderer_idle_vblanks, guest_idle_vblanks,
                     emuenv.display.setframe_call_count.load(), emuenv.display.setframe_accept_count.load());
