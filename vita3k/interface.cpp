@@ -549,24 +549,23 @@ static ExitCode load_app_impl(SceUID &main_module_id, EmuEnvState &emuenv, const
     emuenv.kernel.process_exit_callback = [&emuenv](int res, std::optional<AppLaunchRequest> relaunch) {
         emuenv.post_app_launch_request(relaunch.value_or(AppLaunchRequest{ .reason = AppLaunchReason::ProcessExit }));
     };
-    // Coexisting-build compatibility: Earth Defense Force 2017 Portable (PCSB00239 / PCSE00209)
-    // deadlocks on its own control event flags a couple of seconds after the title screen, while
-    // "Loading game data." is on screen. Every official build (v1.1 through v1.4) defaults
-    // accurate-thread-scheduling to true; this build defaults it to false for frame rate, and
-    // preempt-on-wake follows that same value, so both were off. The v1.1 nightly reaches the game
-    // reliably with them on, so force them back on for this title only and leave the fast default
-    // everywhere else. This is a workaround, not a fix: the underlying regression is in the shared
-    // scheduling/sync code and still needs to be found.
-    const bool title_needs_accurate_sched = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
-    emuenv.kernel.accurate_thread_scheduling = emuenv.cfg.current_config.accurate_thread_scheduling || title_needs_accurate_sched;
-    // preempt-on-wake goes with accurate thread scheduling on every platform
-    emuenv.kernel.preempt_on_wake = emuenv.kernel.accurate_thread_scheduling;
+    // Earth Defense Force 2017 Portable (PCSB00239 / PCSE00209) hangs on "Loading game data." in
+    // every v1.4-based build, the official one included, while the v1.1 nightly reaches the game.
+    // The one scheduling mechanism this build adds on top of upstream is the per-core lock: guest
+    // threads pinned to the same single core take turns on it. EDF starts nine threads and its
+    // affinities put three of them on core 0 and one on core 1; with the lock on they park each
+    // other and the whole process ends up asleep with zero CPU. Leave the lock off for this title
+    // only, the rest of the library keeps it.
+    const bool title_disable_core_lock = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
+    emuenv.kernel.accurate_thread_scheduling = emuenv.cfg.current_config.accurate_thread_scheduling;
+    emuenv.kernel.preempt_on_wake = emuenv.cfg.current_config.accurate_thread_scheduling;
     emuenv.kernel.preempt_on_wake_us = emuenv.cfg.current_config.preempt_on_wake_us;
-    LOG_INFO("CONFIG (applied): memory_mapping={} accurate_thread_scheduling={} preempt_on_wake={} high_accuracy={} res_multiplier={} guest_cores={} disable_surface_sync={} file_loading_delay={}",
+    LOG_INFO("CONFIG (applied): memory_mapping={} accurate_thread_scheduling={} preempt_on_wake={} high_accuracy={} res_multiplier={} guest_cores={} disable_surface_sync={} file_loading_delay={} core_lock={}",
         emuenv.cfg.current_config.memory_mapping, emuenv.kernel.accurate_thread_scheduling,
         emuenv.kernel.preempt_on_wake,
         emuenv.cfg.current_config.high_accuracy, emuenv.cfg.current_config.resolution_multiplier, emuenv.cfg.current_config.guest_cores,
-        emuenv.cfg.current_config.disable_surface_sync, emuenv.cfg.current_config.file_loading_delay);
+        emuenv.cfg.current_config.disable_surface_sync, emuenv.cfg.current_config.file_loading_delay,
+        title_disable_core_lock ? "off" : "on");
     guest_sched_set_cores(emuenv.cfg.current_config.guest_cores);
     if (emuenv.kernel.accurate_thread_scheduling)
         LOG_INFO("Accurate thread scheduling enabled: default-affinity guest threads run one at a time, by priority");
@@ -574,6 +573,7 @@ static ExitCode load_app_impl(SceUID &main_module_id, EmuEnvState &emuenv, const
         LOG_INFO("Preempt-on-wake enabled ({}us window): a thread that wakes a higher-priority thread waits for it only when the woken thread has no free core to run on", emuenv.kernel.preempt_on_wake_us);
     static uint32_t game_boots = 0;
     game_boots++;
+    core_lock_set_enabled(!title_disable_core_lock);
     core_lock_begin_boot(game_boots);
     guest_assert_begin_boot();
 

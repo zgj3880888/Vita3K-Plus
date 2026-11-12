@@ -49,6 +49,7 @@ void start_preempt_wait(KernelState &kernel, SceUID starter_id, const std::share
 void start_preempt_file_call(const char *export_name);
 int preempt_core_count(SceInt32 affinity);
 std::vector<std::shared_ptr<ThreadState>> preempt_runnable_threads(KernelState &kernel, const ThreadState *caller);
+void core_lock_set_enabled(bool on);
 void core_lock_begin_boot(uint32_t boot);
 bool core_lock_shares_core(SceInt32 a, SceInt32 b);
 void core_lock_release_for_block();

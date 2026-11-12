@@ -559,6 +559,7 @@ struct CoreLock {
 std::mutex g_core_mutex;
 std::condition_variable g_core_cv;
 std::array<CoreLock, CORE_LOCK_CORES> g_cores;
+std::atomic<bool> g_core_lock_enabled{ true };
 std::atomic<uint32_t> g_core_boot{ 0 };
 uint64_t g_core_ticket = 0;
 std::array<CoreRec, CORE_LOCK_RING_SIZE> g_core_ring{};
@@ -573,10 +574,6 @@ std::set<SceUID> g_core_announced;
 thread_local int tls_core = -1;
 thread_local uint64_t tls_core_gen = 0;
 thread_local const ThreadState *tls_core_thread = nullptr;
-
-// [SCHED-PROBE] How many blocking transitions have been reported so far, used to
-// throttle the probe. Relaxed: it only drives log verbosity.
-std::atomic<uint64_t> sched_probe_blocks{ 0 };
 
 int64_t core_now_ns() {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -832,6 +829,8 @@ void core_release_current(const uint8_t ev) {
 }
 
 bool core_lock_held_by(const ThreadState *t) {
+    if (!g_core_lock_enabled.load(std::memory_order_relaxed))
+        return false;
     return tls_core >= 0 && tls_core_thread == t;
 }
 
@@ -840,6 +839,8 @@ bool core_still_mine(const int core, const ThreadState *t) {
 }
 
 void core_lock_before_guest(ThreadState &t) {
+    if (!g_core_lock_enabled.load(std::memory_order_relaxed))
+        return;
     const int want = core_of(t.affinity_mask);
     if (tls_core >= 0) {
         if (want >= 0 && core_still_mine(want, &t))
@@ -851,6 +852,8 @@ void core_lock_before_guest(ThreadState &t) {
 }
 
 void core_lock_after_run(const ThreadState &t) {
+    if (!g_core_lock_enabled.load(std::memory_order_relaxed))
+        return;
     if (tls_core < 0)
         return;
     const CoreLock &c = g_cores[tls_core];
@@ -872,7 +875,29 @@ void core_lock_forget(const ThreadState *t) {
 }
 } // namespace
 
+void core_lock_set_enabled(const bool on) {
+    if (g_core_lock_enabled.exchange(on, std::memory_order_relaxed) == on)
+        return;
+    if (!on) {
+        // Drop every core right now: a holder from an earlier boot must not leave waiters parked.
+        const std::lock_guard<std::mutex> lock(g_core_mutex);
+        for (CoreLock &c : g_cores) {
+            c.holder = nullptr;
+            c.gen.fetch_add(1, std::memory_order_relaxed);
+            c.waiters.clear();
+            c.best_waiter.store(256, std::memory_order_relaxed);
+            core_reset_window(c);
+        }
+        g_core_cv.notify_all();
+    }
+    LOG_INFO("[CORELOCK] per-core lock {} for this title", on ? "enabled" : "DISABLED");
+}
+
 void core_lock_begin_boot(const uint32_t boot) {
+    if (!g_core_lock_enabled.load(std::memory_order_relaxed)) {
+        LOG_INFO("[CORELOCK] game boot {}: per-core lock is disabled for this title, guest threads are not pinned", boot);
+        return;
+    }
     {
         const std::lock_guard<std::mutex> lock(g_core_mutex);
         for (CoreLock &c : g_cores) {
@@ -893,6 +918,8 @@ void core_lock_begin_boot(const uint32_t boot) {
 }
 
 bool core_lock_shares_core(const SceInt32 a, const SceInt32 b) {
+    if (!g_core_lock_enabled.load(std::memory_order_relaxed))
+        return false;
     const int core = core_of(a);
     return core >= 0 && core == core_of(b);
 }
@@ -1856,23 +1883,6 @@ ThreadState::~ThreadState() {
 void ThreadState::update_status(ThreadStatus status, std::optional<ThreadStatus> expected) {
     if (expected)
         assert(expected.value() == this->status);
-
-    // [SCHED-PROBE] Record every blocking transition together with the core the
-    // thread was parked on and what it is waiting for. A game that freezes while
-    // every thread still looks "alive" needs exactly this: which thread went to
-    // sleep, on which core, and what it is blocked on. Deliberately lock-free:
-    // update_status can be reached from paths that already hold g_core_mutex.
-    // Throttled, because a title that blocks thousands of times would otherwise
-    // drown the log.
-    if (status == ThreadStatus::wait && core_lock_held_by(this)) {
-        const int core = core_of(affinity_mask);
-        const uint64_t n = sched_probe_blocks.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (n <= 200 || (n % 500) == 0) {
-            LOG_INFO("[SCHED-PROBE] #{} '{}' (#{} p{}) blocks on core {} (aff 0x{:X}) waiting on {} uid=0x{:X} while holding that core's lock",
-                n, name, id, priority, core, static_cast<uint32_t>(affinity_mask),
-                wait_prim_kind ? wait_prim_kind : "unknown", static_cast<uint32_t>(wait_prim_uid));
-        }
-    }
 
     if (status == ThreadStatus::wait && cpu && (cpu.get() == guest_sched_token_cpu() || core_lock_held_by(this)))
         guest_sched_release_for_block();
