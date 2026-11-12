@@ -93,6 +93,14 @@ struct GxmState {
     std::unordered_map<SceGxmContext *, OpenScene> open_scenes;
     uint64_t open_scene_serial = 0;
 
+    // Progress marker for sceGxmEndScene. A game that stops presenting keeps one guest thread
+    // parked inside that export, and a bare PC tells nothing about where it stopped, so every
+    // step publishes its name here and the hang watchdog reports the last one reached.
+    std::atomic<const char *> endscene_stage{ nullptr };
+    std::atomic<int64_t> endscene_stage_epoch_ms{ 0 };
+    std::atomic<int> endscene_stage_thread{ 0 };
+    std::atomic<uint64_t> endscene_calls{ 0 };
+
     void deinit() {
         if (display_host_thread.joinable())
             display_host_thread.join();

@@ -129,6 +129,10 @@ struct State {
     std::atomic<int> wait_last_kind{ -1 };
     std::atomic<int64_t> wait_last_epoch_ms{ 0 };
     std::atomic<uint32_t> wait_fences_pending{ 0 };
+    // Where the render thread is right now, so a heartbeat can name the step that never returns.
+    std::atomic<const char *> render_stage{ nullptr };
+    std::atomic<int64_t> render_stage_epoch_ms{ 0 };
+    std::atomic<uint32_t> render_loops{ 0 };
 
     bool should_display;
 

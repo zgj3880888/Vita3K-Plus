@@ -268,10 +268,26 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
                 if (!emuenv.renderer)
                     return;
                 const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
-                LOG_ERROR("RENDERER HEARTBEAT: last command opcode {} {} ms ago, in dormant GPU wait={}, progress={} | wait thread: last request kind {} {} ms ago, fences pending {} | last memory transition {} ms ago",
+                const char *es_stage = emuenv.gxm.endscene_stage.load(std::memory_order_relaxed);
+                const int64_t es_ms = emuenv.gxm.endscene_stage_epoch_ms.load(std::memory_order_relaxed);
+                const char *render_stage = emuenv.renderer->render_stage.load(std::memory_order_relaxed);
+                const int64_t render_stage_ms = emuenv.renderer->render_stage_epoch_ms.load(std::memory_order_relaxed);
+                uint64_t cmd_queue_depth = 0;
+                {
+                    auto &queue_mutex = emuenv.renderer->command_buffer_queue.get_mutex();
+                    if (queue_mutex.try_lock()) {
+                        cmd_queue_depth = emuenv.renderer->command_buffer_queue.size();
+                        queue_mutex.unlock();
+                    }
+                }
+                LOG_ERROR("RENDERER HEARTBEAT: last command opcode {} {} ms ago, in dormant GPU wait={}, progress={} | wait thread: last request kind {} {} ms ago, fences pending {} | last memory transition {} ms ago | gxm endscene stage '{}' for {} ms (thread {}), {} call(s) | render thread stage '{}' for {} ms, {} loop(s) | cmd queue {} of {}",
                     emuenv.renderer->last_cmd_opcode.load(), now_ms - emuenv.renderer->last_cmd_epoch_ms.load(), emuenv.renderer->in_dormant_wait.load(),
                     emuenv.renderer->progress_counter.load(), emuenv.renderer->wait_last_kind.load(), now_ms - emuenv.renderer->wait_last_epoch_ms.load(),
-                    emuenv.renderer->wait_fences_pending.load(), now_ms - emuenv.renderer->last_mem_transition_epoch_ms.load());
+                    emuenv.renderer->wait_fences_pending.load(), now_ms - emuenv.renderer->last_mem_transition_epoch_ms.load(),
+                    es_stage ? es_stage : "-", es_ms ? now_ms - es_ms : -1,
+                    emuenv.gxm.endscene_stage_thread.load(std::memory_order_relaxed), emuenv.gxm.endscene_calls.load(std::memory_order_relaxed),
+                    render_stage ? render_stage : "-", render_stage_ms ? now_ms - render_stage_ms : -1, emuenv.renderer->render_loops.load(),
+                    cmd_queue_depth, emuenv.renderer->command_buffer_queue.maxPendingCount_);
             };
             const uint64_t setframe = emuenv.display.last_setframe_vblank_count.load();
             const uint64_t vblanks = emuenv.display.vblank_count.load();

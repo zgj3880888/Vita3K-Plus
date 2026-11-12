@@ -16,6 +16,7 @@
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
 #include <array>
+#include <chrono>
 #include <cpu/functions.h>
 #include <renderer/commands.h>
 #include <renderer/driver_functions.h>
@@ -291,6 +292,8 @@ void process_batches(renderer::State &state, const FeatureState &features, MemSt
         }
 
         state.command_buffer_queue.pop();
+        state.render_stage.store("handling_batch", std::memory_order_relaxed);
+        state.render_stage_epoch_ms.store(duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(), std::memory_order_relaxed);
         process_batch(state, features, mem, config, *cmd_list);
     }
 }
@@ -361,19 +364,27 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
             state.swap_window();
         }
     }
+    const auto render_mark = [&state](const char *stage) {
+        state.render_stage.store(stage, std::memory_order_relaxed);
+        state.render_stage_epoch_ms.store(duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(), std::memory_order_relaxed);
+    };
     try {
         while (!state.render_abort.load(std::memory_order_relaxed)) {
 #ifdef TRACY_ENABLE
             ZoneScopedN("Game rendering");
 #endif
+            render_mark("loop_start");
+            state.render_loops.fetch_add(1, std::memory_order_relaxed);
             if (!state.set_current())
                 break;
 
+            render_mark("process_batches");
             process_batches(state, state.features, mem, config, 500);
 
             if (state.render_abort.load(std::memory_order_relaxed))
                 break;
 
+            render_mark("render_thread_tasks");
             state.run_render_thread_tasks();
 
             if (state.overlay_manager) {
@@ -390,9 +401,12 @@ static void render_loop(renderer::State &state, DisplayState &display, GxmState 
                 }
             }
 
+            render_mark("render_frame");
             state.render_frame(display, gxm, mem);
+            render_mark("swap_window");
             state.swap_window();
             state.async_flip_requested.store(false, std::memory_order_relaxed);
+            render_mark("loop_end");
 
 #ifdef TRACY_ENABLE
             FrameMark;

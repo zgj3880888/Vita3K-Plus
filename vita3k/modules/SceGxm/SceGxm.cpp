@@ -20,6 +20,8 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
+#include <thread>
 #include <cpu/functions.h>
 #include <modules/module_parent.h>
 #include <mutex>
@@ -2873,6 +2875,16 @@ EXPORT(int, sceGxmEndScene, SceGxmContext *context, SceGxmNotification *vertexNo
     TRACY_FUNC(sceGxmEndScene, context, vertexNotification, fragmentNotification);
     const MemState &mem = emuenv.mem;
 
+    // Publish which step this call reached, so a hang dump can tell a parked EndScene from a
+    // slow one. Nothing is logged here: only the marker is moved.
+    const auto es_stage = [&](const char *name) {
+        emuenv.gxm.endscene_stage.store(name, std::memory_order_relaxed);
+        emuenv.gxm.endscene_stage_epoch_ms.store(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count(), std::memory_order_relaxed);
+        emuenv.gxm.endscene_stage_thread.store(static_cast<int>(std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFF), std::memory_order_relaxed);
+    };
+    emuenv.gxm.endscene_calls.fetch_add(1, std::memory_order_relaxed);
+    es_stage("enter");
+
     if (!context) {
         return RET_ERROR(SCE_GXM_ERROR_INVALID_POINTER);
     }
@@ -2889,7 +2901,9 @@ EXPORT(int, sceGxmEndScene, SceGxmContext *context, SceGxmNotification *vertexNo
 
     // Add command to end the scene
     guest_sched_release_for_block();
+    es_stage("released_sched");
     renderer::sync_surface_data(*emuenv.renderer, context->renderer.get(), vertexNotification ? *vertexNotification : empty_notification, fragmentNotification ? *fragmentNotification : empty_notification);
+    es_stage("synced_surface");
 
     if (context->state.fragment_sync_object) {
         SceGxmSyncObject *sync = context->state.fragment_sync_object.get(mem);
@@ -2899,26 +2913,32 @@ EXPORT(int, sceGxmEndScene, SceGxmContext *context, SceGxmNotification *vertexNo
         renderer::add_command(context->renderer.get(), renderer::CommandOpcode::SignalSyncObject,
             nullptr, context->state.fragment_sync_object, cmd_timestamp);
     }
+    es_stage("signalled_sync");
 
     // the hardware starts vertex processing here so this is when the vertex streams are copied.
     // games may reuse them as soon as that is done (which is long before we can render the scene)
     if (emuenv.renderer->features.enable_memory_mapping)
         renderer::stream_snapshot_kick(emuenv.mem, context->renderer->command_list);
+    es_stage("snapped_streams");
 
     // Submit our command list
     renderer::submit_command_list(*emuenv.renderer, context->renderer.get(), context->renderer->command_list);
+    es_stage("submitted");
     renderer::reset_command_list(context->renderer->command_list);
+    es_stage("reset_list");
 
     const auto immediate_context = emuenv.gxm.immediate_contexts.find(context);
     if (immediate_context != emuenv.gxm.immediate_contexts.end())
         emuenv.gxm.last_immediate_context = immediate_context->second;
 
+    es_stage("closing");
     context->state.active = false;
     {
         const std::lock_guard<std::mutex> lock(emuenv.gxm.open_scenes_mutex);
         emuenv.gxm.open_scenes.erase(context);
     }
     emuenv.gxm.open_scenes_cond.notify_all();
+    es_stage("done");
     return 0;
 }
 

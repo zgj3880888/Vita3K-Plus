@@ -15,6 +15,7 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
+#include <atomic>
 #include <chrono>
 #include <future>
 #include <memory>
@@ -230,6 +231,17 @@ void subject_done(SceGxmSyncObject *sync_object, const uint32_t timestamp) {
 
 void submit_command_list(State &state, renderer::Context *context, CommandList &command_list) {
     command_list.context = context;
+    // A full queue means the render thread stopped draining, and the guest thread that submits
+    // is the one that appears hung afterwards, so time the hand-off.
+    const auto submit_start = std::chrono::steady_clock::now();
     state.command_buffer_queue.push(std::move(command_list));
+    const auto submit_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - submit_start).count();
+    if (submit_ms >= 500) {
+        static std::atomic<int64_t> last_log_ms{ 0 };
+        const int64_t now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        int64_t prev = last_log_ms.load(std::memory_order_relaxed);
+        if (now_ms - prev >= 1'000 && last_log_ms.compare_exchange_strong(prev, now_ms))
+            LOG_ERROR("[CMDQ] submit_command_list blocked for {} ms (queue depth {} of {}): the render thread is not draining command lists", submit_ms, state.command_buffer_queue.size(), state.command_buffer_queue.maxPendingCount_);
+    }
 }
 } // namespace renderer

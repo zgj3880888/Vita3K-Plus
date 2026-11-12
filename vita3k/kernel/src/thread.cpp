@@ -929,6 +929,8 @@ void core_lock_release_for_block() {
 }
 
 void core_lock_take_current() {
+    if (!g_core_lock_enabled.load(std::memory_order_relaxed))
+        return;
     ThreadState *const t = g_tls_guest_thread;
     if (!t)
         return;
