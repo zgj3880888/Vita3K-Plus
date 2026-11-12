@@ -549,12 +549,21 @@ static ExitCode load_app_impl(SceUID &main_module_id, EmuEnvState &emuenv, const
     emuenv.kernel.process_exit_callback = [&emuenv](int res, std::optional<AppLaunchRequest> relaunch) {
         emuenv.post_app_launch_request(relaunch.value_or(AppLaunchRequest{ .reason = AppLaunchReason::ProcessExit }));
     };
-    emuenv.kernel.accurate_thread_scheduling = emuenv.cfg.current_config.accurate_thread_scheduling;
+    // Coexisting-build compatibility: Earth Defense Force 2017 Portable (PCSB00239 / PCSE00209)
+    // deadlocks on its own control event flags a couple of seconds after the title screen, while
+    // "Loading game data." is on screen. Every official build (v1.1 through v1.4) defaults
+    // accurate-thread-scheduling to true; this build defaults it to false for frame rate, and
+    // preempt-on-wake follows that same value, so both were off. The v1.1 nightly reaches the game
+    // reliably with them on, so force them back on for this title only and leave the fast default
+    // everywhere else. This is a workaround, not a fix: the underlying regression is in the shared
+    // scheduling/sync code and still needs to be found.
+    const bool title_needs_accurate_sched = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
+    emuenv.kernel.accurate_thread_scheduling = emuenv.cfg.current_config.accurate_thread_scheduling || title_needs_accurate_sched;
     // preempt-on-wake goes with accurate thread scheduling on every platform
-    emuenv.kernel.preempt_on_wake = emuenv.cfg.current_config.accurate_thread_scheduling;
+    emuenv.kernel.preempt_on_wake = emuenv.kernel.accurate_thread_scheduling;
     emuenv.kernel.preempt_on_wake_us = emuenv.cfg.current_config.preempt_on_wake_us;
     LOG_INFO("CONFIG (applied): memory_mapping={} accurate_thread_scheduling={} preempt_on_wake={} high_accuracy={} res_multiplier={} guest_cores={} disable_surface_sync={} file_loading_delay={}",
-        emuenv.cfg.current_config.memory_mapping, emuenv.cfg.current_config.accurate_thread_scheduling,
+        emuenv.cfg.current_config.memory_mapping, emuenv.kernel.accurate_thread_scheduling,
         emuenv.kernel.preempt_on_wake,
         emuenv.cfg.current_config.high_accuracy, emuenv.cfg.current_config.resolution_multiplier, emuenv.cfg.current_config.guest_cores,
         emuenv.cfg.current_config.disable_surface_sync, emuenv.cfg.current_config.file_loading_delay);
