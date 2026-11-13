@@ -79,12 +79,12 @@ static SceInt32 preempt_user_cores(const SceInt32 affinity) {
     return cores ? cores : SCE_KERNEL_CPU_MASK_USER_ALL;
 }
 
-int preempt_core_count(const SceInt32 affinity) {
+static int preempt_core_count(const SceInt32 affinity) {
     const SceInt32 cores = preempt_user_cores(affinity);
     return ((cores & 0x10000) != 0) + ((cores & 0x20000) != 0) + ((cores & 0x40000) != 0);
 }
 
-std::vector<ThreadStatePtr> preempt_runnable_threads(KernelState &kernel, const ThreadState *caller) {
+static std::vector<ThreadStatePtr> preempt_runnable_threads(KernelState &kernel, const ThreadState *caller) {
     std::vector<ThreadStatePtr> threads;
     {
         const std::lock_guard<std::mutex> lock(kernel.mutex);
@@ -169,62 +169,23 @@ struct EvfOp {
     uint32_t flags_after;
     uint32_t woken;
 };
-// 512 was too small: a two-thread ping-pong on one flag (e.g. tid8<->tid84 on bits 0x8)
-// fills the whole ring in a few hundred milliseconds and evicts the start-up burst that
-// actually explains the stall. Keep ~16x more so the first frames survive.
-constexpr size_t EVF_RING_SIZE = 8192;
+constexpr size_t EVF_RING_SIZE = 512;
 std::array<EvfOp, EVF_RING_SIZE> evf_ring{};
 std::atomic<uint64_t> evf_ring_next{ 0 };
 
 // every thread that EVER set each flag: the provable-cycle breaker needs "who could wake this"
 std::mutex evf_setters_mutex;
 std::unordered_map<SceUID, std::set<SceUID>> evf_setters;
-
-// Per-BIT lifetime record. Knowing that "some thread once set this flag" is not enough: the
-// question that decides a hang is whether the specific bit a waiter wants was ever raised, by
-// whom, and how long ago. A bit that never appears here cannot be produced by the guest at all,
-// which means the deadlock has to be broken from outside (or the guest was mis-emulated earlier).
-struct EvfBitInfo {
-    uint32_t set_count = 0;
-    SceUID last_tid = -1;
-    uint64_t first_ms = 0;
-    uint64_t last_ms = 0;
-};
-std::unordered_map<SceUID, std::array<EvfBitInfo, 32>> evf_bits;
 std::mutex evf_dead_since_mutex;
 std::unordered_map<SceUID, uint64_t> evf_dead_since;
 
 void evf_record(SceUID evf, SceUID thread, uint8_t op, uint32_t bits, uint32_t flags_after, uint32_t woken) {
-    const uint64_t idx = evf_ring_next.fetch_add(1, std::memory_order_relaxed);
-    const uint64_t ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-    if (op == 0) {
-        // A raise can never be observed as a net loss of bits. When it is, something is
-        // clearing the flag it was just told to raise - that is an emulator bug, not a game
-        // one, and it is worth saying so once instead of leaving it to be inferred from a
-        // collapsed history dump. (This is how the inverted sceKernelClearEventFlag was found.)
-        const EvfOp &last = evf_ring[(idx - 1) % EVF_RING_SIZE];
-        if (last.evf == evf && last.op == 0 && last.flags_after == flags_after && (flags_after & bits) == 0) {
-            static std::atomic<uint32_t> inverted_clear_reports{ 0 };
-            if (inverted_clear_reports.fetch_add(1, std::memory_order_relaxed) < 8)
-                LOG_ERROR("[EVFSETLOST] flag {} raise of 0x{:X} by tid {} left the flag at 0x{:X} (unchanged from the previous raise) - a clear is racing the set",
-                    evf, bits, thread, flags_after);
-        }
-    }
     if (op == 0 && thread > 0) {
         const std::lock_guard<std::mutex> lock(evf_setters_mutex);
         evf_setters[evf].insert(thread);
-        auto &per_bit = evf_bits[evf];
-        for (int b = 0; b < 32; b++) {
-            if ((bits & (1u << b)) == 0)
-                continue;
-            EvfBitInfo &info = per_bit[b];
-            if (info.set_count == 0)
-                info.first_ms = ms;
-            info.set_count++;
-            info.last_tid = thread;
-            info.last_ms = ms;
-        }
     }
+    const uint64_t idx = evf_ring_next.fetch_add(1, std::memory_order_relaxed);
+    const uint64_t ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
     evf_ring[idx % EVF_RING_SIZE] = EvfOp{ ms, evf, thread, op, bits, flags_after, woken };
 }
 
@@ -607,8 +568,7 @@ SceInt32 simple_event_clear(KernelState &kernel, const char *export_name, SceUID
 
     const std::lock_guard<std::mutex> event_lock(event->mutex);
 
-    // Same inversion as sceKernelClearEventFlag: clear_pattern names the bits to drop.
-    event->pattern &= ~clear_pattern;
+    event->pattern &= clear_pattern;
 
     return SCE_KERNEL_OK;
 }
@@ -2225,13 +2185,7 @@ SceUID eventflag_clear(KernelState &kernel, const char *export_name, SceUID evfI
 
     const std::lock_guard<std::mutex> event_lock(event->mutex);
 
-    // sceKernelClearEventFlag(evf, pattern) CLEARS the bits named by pattern. Keeping
-    // `flags &= pattern` (the upstream spelling) inverts the meaning of every call: a guest
-    // doing clear(0x8) to acknowledge bit 3 would drop every other bit instead and leave bit 3
-    // set forever, so the next waiter for bit 3 blocks on a flag nobody will raise again.
-    // log_eventflag_history() reported exactly that shape ("bit 7 was set 1068x, last 3 ms
-    // ago, waiter still blocked on 0x80") on EDF's loading stall.
-    event->flags &= ~bitPattern;
+    event->flags &= bitPattern;
     evf_record(evfId, 0, 1, bitPattern, event->flags, 0);
 
     return SCE_KERNEL_OK;
@@ -2467,7 +2421,6 @@ void KernelState::clear_evf_cycle_history() {
     {
         const std::lock_guard<std::mutex> lock(evf_setters_mutex);
         evf_setters.clear();
-        evf_bits.clear();
     }
     const std::lock_guard<std::mutex> lock(evf_dead_since_mutex);
     evf_dead_since.clear();
@@ -2488,103 +2441,21 @@ void KernelState::log_eventflag_history() {
             continue;
         if (event->waiting_threads->empty())
             continue;
-        const uint64_t now_ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
-        std::array<EvfBitInfo, 32> bits_info{};
-        bool have_bits = false;
-        {
-            const std::lock_guard<std::mutex> lock(evf_setters_mutex);
-            const auto it = evf_bits.find(uid);
-            if (it != evf_bits.end()) {
-                bits_info = it->second;
-                have_bits = true;
-            }
-        }
         std::string waiters;
-        uint32_t wanted_all = 0;
-        for (const auto &w : *event->waiting_threads) {
-            waiters += fmt::format(" [tid={} '{}' wants=0x{:X} mode=0x{:X}]", w.thread ? w.thread->id : -1,
-                w.thread ? w.thread->name : std::string("?"), static_cast<uint32_t>(w.flags), w.wait);
-            wanted_all |= static_cast<uint32_t>(w.flags);
-        }
+        for (const auto &w : *event->waiting_threads)
+            waiters += fmt::format(" [tid={} wants=0x{:X} mode=0x{:X}]", w.thread ? w.thread->id : -1, w.flags, w.wait);
         LOG_ERROR("HANG EVF: flag {} '{}' current=0x{:X} waiters:{}", uid, event->name, event->flags, waiters);
-        // Per-bit lifetime history. "Some thread once set this flag" does not answer the question;
-        // what decides a hang is whether the exact bit a waiter wants was ever raised, by whom,
-        // and how long ago. A wanted bit that appears with zero count cannot be produced by the
-        // guest at all, so the stall is not a scheduling accident.
-        for (int b = 0; b < 32; b++) {
-            const bool wanted = (wanted_all & (1u << b)) != 0;
-            const bool ever = have_bits && bits_info[b].set_count > 0;
-            if (!wanted && !ever)
-                continue;
-            if (ever) {
-                LOG_ERROR("HANG EVF BIT: flag {} bit {} (0x{:X}){} set {}x, last by tid {} {} ms ago (first set {} ms ago)",
-                    uid, b, 1u << b, wanted ? " WANTED" : "", bits_info[b].set_count, bits_info[b].last_tid,
-                    now_ms >= bits_info[b].last_ms ? now_ms - bits_info[b].last_ms : 0,
-                    now_ms >= bits_info[b].first_ms ? now_ms - bits_info[b].first_ms : 0);
-            } else {
-                LOG_ERROR("HANG EVF BIT: flag {} bit {} (0x{:X}){} NEVER SET by any thread", uid, b, 1u << b, wanted ? " WANTED" : "");
-            }
-        }
-        for (const auto &w : *event->waiting_threads) {
-            const uint32_t f = static_cast<uint32_t>(w.flags);
-            uint32_t never = 0;
-            for (int b = 0; b < 32; b++)
-                if ((f & (1u << b)) && !(have_bits && bits_info[b].set_count > 0))
-                    never |= (1u << b);
-            LOG_ERROR("HANG EVF VERDICT: tid {} '{}' wants 0x{:X} -> {}", w.thread ? w.thread->id : -1,
-                w.thread ? w.thread->name : std::string("?"), f,
-                never ? fmt::format("UNSATISFIABLE, bit(s) 0x{:X} were never set by anyone", never)
-                      : std::string("bits raised, waiter still blocked: check whether a CLEAR took them away between the raise and the wake (inverted sceKernelClearEventFlag, or a WAITCLEAR waiter wiping the whole flag)"));
-        }
-    }
-    // Who has EVER set each flag. This is the missing half of the deadlock question: a waiter
-    // wanting a bit tells us nothing unless we also know whether any thread ever raises it.
-    // A flag whose waiter set is missing from this table can never be released by the guest.
-    {
-        std::unordered_map<SceUID, std::set<SceUID>> snapshot;
-        {
-            const std::lock_guard<std::mutex> lock(evf_setters_mutex);
-            snapshot = evf_setters;
-        }
-        for (const auto &[uid, tids] : snapshot) {
-            std::string list;
-            for (const SceUID t : tids)
-                list += fmt::format(" {}", t);
-            LOG_ERROR("HANG EVF SETTERS: flag {} has ever been SET by tid(s):{}", uid, list.empty() ? std::string(" <none>") : list);
-        }
     }
     const uint64_t next = evf_ring_next.load(std::memory_order_relaxed);
     const uint64_t count = std::min<uint64_t>(next, EVF_RING_SIZE);
     static const char *op_names[] = { "SET", "CLEAR", "WAIT_OK", "WAIT_BLOCK", "CANCEL" };
     std::string hist;
-    // Collapse runs of identical (evf, op, tid, bits) into one line plus a repeat count. Without
-    // this a two-thread ping-pong buries everything else under hundreds of identical lines.
-    // flags_after is part of the key: run collapsing that ignored it reported "bits=0x8
-    // after=0x2" for 11538 raises, throwing away the one fact that identified the inverted
-    // clear (the flag going DOWN on a SET).
-    uint32_t run = 0;
-    EvfOp prev{};
-    const auto flush_run = [&]() {
-        if (run == 0)
-            return;
-        hist += fmt::format("{} ms={} evf={} tid={} bits=0x{:X} after=0x{:X} woken_or_mode={}{}\n",
-            op_names[prev.op <= 4 ? prev.op : 4], prev.ms, prev.evf, prev.thread, prev.bits, prev.flags_after, prev.woken,
-            run > 1 ? fmt::format(" (x{} consecutive)", run) : std::string());
-        run = 0;
-    };
     for (uint64_t k = next - count; k < next; k++) {
         const EvfOp &e = evf_ring[k % EVF_RING_SIZE];
-        if (run > 0 && e.op == prev.op && e.evf == prev.evf && e.thread == prev.thread && e.bits == prev.bits && e.flags_after == prev.flags_after) {
-            prev = e; // keep the newest timestamp / flags snapshot for the collapsed run
-            run++;
-            continue;
-        }
-        flush_run();
-        prev = e;
-        run = 1;
+        hist += fmt::format("{} ms={} evf={} tid={} bits=0x{:X} after=0x{:X} woken_or_mode={}\n",
+            op_names[e.op <= 4 ? e.op : 4], e.ms, e.evf, e.thread, e.bits, e.flags_after, e.woken);
     }
-    flush_run();
-    LOG_ERROR("HANG EVF HISTORY ({} op(s), oldest first, consecutive duplicates collapsed):\n{}", count, hist);
+    LOG_ERROR("HANG EVF HISTORY ({} op(s), oldest first):\n{}", count, hist);
 }
 
 void KernelState::log_condvar_history() {
@@ -2661,6 +2532,7 @@ int KernelState::try_break_frame_sync_deadlock(std::vector<SceUID> &already_nudg
                 continue;
             bool any_satisfiable = false;
             SceUInt32 need = 0;
+            int best_prio = 0x7fffffff;
             for (auto it = event->waiting_threads->begin(); it != event->waiting_threads->end(); ++it) {
                 const auto &w = *it;
                 const bool cond = (w.wait & SCE_EVENT_WAITOR)
@@ -2670,10 +2542,10 @@ int KernelState::try_break_frame_sync_deadlock(std::vector<SceUID> &already_nudg
                     any_satisfiable = true;
                     break;
                 }
-                // Union of every blocked waiter's request, not just the highest-priority one.
-                // These flags are rendezvous points between several guest threads, so releasing
-                // only one of them just moves the stall to the next waiter that was left behind.
-                need |= static_cast<SceUInt32>(w.flags);
+                if (w.priority < best_prio) {
+                    best_prio = w.priority;
+                    need = static_cast<SceUInt32>(w.flags);
+                }
             }
             if (!any_satisfiable && need != 0)
                 nudges.emplace_back(uid, need);
@@ -2726,14 +2598,14 @@ SceInt32 eventflag_set(KernelState &kernel, const char *export_name, SceUID thre
                     *waiting_thread_data.outBits = event->flags;
                 }
 
-                // Only the waiter whose pattern is actually satisfied may clear it, and only
-                // for itself. The upstream code also let a waiter with WAITCLEAR wipe the whole
-                // flag (event->flags = 0) in the middle of this loop, which throws away the bits
-                // every remaining waiter was still waiting for - the rest of the queue then sees
-                // a zeroed flag and blocks forever. A real raise-a-waiting-thread never clears
-                // anything on the producer's side; clearing belongs to the consumer in
-                // eventflag_waitorpoll(). That distinction is what the loading stall showed:
-                // "bit 3 set 11538x, last 3 ms ago, waiter still blocked on 0x8".
+                if (waiting_thread_data.wait & SCE_EVENT_WAITCLEAR) {
+                    event->flags = 0;
+                }
+
+                if (waiting_thread_data.wait & SCE_EVENT_WAITCLEAR_PAT) {
+                    event->flags &= ~waiting_flags;
+                }
+
                 const std::lock_guard<std::mutex> waiting_thread_lock(waiting_thread->mutex);
 
                 waiting_thread->update_status(ThreadStatus::run, ThreadStatus::wait);

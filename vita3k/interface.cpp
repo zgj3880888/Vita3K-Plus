@@ -551,22 +551,44 @@ static ExitCode load_app_impl(SceUID &main_module_id, EmuEnvState &emuenv, const
     };
     // Earth Defense Force 2017 Portable (PCSB00239 / PCSE00209) hangs on "Loading game data." in
     // every v1.4-based build, the official one included, while the v1.1 nightly reaches the game.
-    // The one scheduling mechanism this build adds on top of upstream is the per-core lock: guest
-    // threads pinned to the same single core take turns on it. EDF starts nine threads and its
-    // affinities put three of them on core 0 and one on core 1; with the lock on they park each
-    // other and the whole process ends up asleep with zero CPU. Leave the lock off for this title
-    // only, the rest of the library keeps it.
-    const bool title_disable_core_lock = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
+    // That nightly is bbcbbd55 (2026-08-28), 204 commits behind this tree, and the differences
+    // that could matter are all in the scheduling layer added since:
+    //
+    //   - the per-core lock (e7f22c7200), which makes guest threads pinned to the same core take
+    //     turns on it. EDF's affinities put three threads on core 0 and one on core 1, so with the
+    //     lock on they park each other and the process ends up asleep with zero CPU.
+    //   - accurate_thread_scheduling, which that nightly defaulted to false. With it false the
+    //     guest-execution gate is a no-op (sched_acquire returns immediately), so the nightly's
+    //     guest_cores=1 never actually limited anything.
+    //   - preempt_on_wake, which only exists in this tree and makes a waking thread wait for the
+    //     thread it just woke.
+    //
+    // Restoring the nightly's semantics for this title therefore means switching off all three of
+    // them together, not just the lock: turning off the lock alone still leaves the gate limiting
+    // the guest to cfg.guest_cores runnable threads, which is a different machine from the one the
+    // game was known to boot on.
+    const bool title_use_nightly_scheduling = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
+    const bool title_disable_core_lock = title_use_nightly_scheduling;
     emuenv.kernel.accurate_thread_scheduling = emuenv.cfg.current_config.accurate_thread_scheduling;
     emuenv.kernel.preempt_on_wake = emuenv.cfg.current_config.accurate_thread_scheduling;
     emuenv.kernel.preempt_on_wake_us = emuenv.cfg.current_config.preempt_on_wake_us;
+    int effective_guest_cores = emuenv.cfg.current_config.guest_cores;
+    if (title_use_nightly_scheduling) {
+        // bbcbbd55 ran with ATS off, no preempt-on-wake, guest_cores 1 and no core lock. Its
+        // guest_cores value is inert while ATS is off, so keep it at the nightly's value for the
+        // log to compare against rather than inventing a third combination.
+        emuenv.kernel.accurate_thread_scheduling = false;
+        emuenv.kernel.preempt_on_wake = false;
+        effective_guest_cores = 1;
+        LOG_INFO("EDF scheduling override: matching the v1.1 nightly (bbcbbd55) - accurate_thread_scheduling=off, preempt_on_wake=off, guest_cores=1, core_lock=off");
+    }
     LOG_INFO("CONFIG (applied): memory_mapping={} accurate_thread_scheduling={} preempt_on_wake={} high_accuracy={} res_multiplier={} guest_cores={} disable_surface_sync={} file_loading_delay={} core_lock={}",
         emuenv.cfg.current_config.memory_mapping, emuenv.kernel.accurate_thread_scheduling,
         emuenv.kernel.preempt_on_wake,
-        emuenv.cfg.current_config.high_accuracy, emuenv.cfg.current_config.resolution_multiplier, emuenv.cfg.current_config.guest_cores,
+        emuenv.cfg.current_config.high_accuracy, emuenv.cfg.current_config.resolution_multiplier, effective_guest_cores,
         emuenv.cfg.current_config.disable_surface_sync, emuenv.cfg.current_config.file_loading_delay,
         title_disable_core_lock ? "off" : "on");
-    guest_sched_set_cores(emuenv.cfg.current_config.guest_cores);
+    guest_sched_set_cores(effective_guest_cores);
     if (emuenv.kernel.accurate_thread_scheduling)
         LOG_INFO("Accurate thread scheduling enabled: default-affinity guest threads run one at a time, by priority");
     if (emuenv.kernel.preempt_on_wake)
