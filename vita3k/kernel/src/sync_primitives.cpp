@@ -197,6 +197,19 @@ std::unordered_map<SceUID, uint64_t> evf_dead_since;
 void evf_record(SceUID evf, SceUID thread, uint8_t op, uint32_t bits, uint32_t flags_after, uint32_t woken) {
     const uint64_t idx = evf_ring_next.fetch_add(1, std::memory_order_relaxed);
     const uint64_t ms = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+    if (op == 0) {
+        // A raise can never be observed as a net loss of bits. When it is, something is
+        // clearing the flag it was just told to raise - that is an emulator bug, not a game
+        // one, and it is worth saying so once instead of leaving it to be inferred from a
+        // collapsed history dump. (This is how the inverted sceKernelClearEventFlag was found.)
+        const EvfOp &last = evf_ring[(idx - 1) % EVF_RING_SIZE];
+        if (last.evf == evf && last.op == 0 && last.flags_after == flags_after && (flags_after & bits) == 0) {
+            static std::atomic<uint32_t> inverted_clear_reports{ 0 };
+            if (inverted_clear_reports.fetch_add(1, std::memory_order_relaxed) < 8)
+                LOG_ERROR("[EVFSETLOST] flag {} raise of 0x{:X} by tid {} left the flag at 0x{:X} (unchanged from the previous raise) - a clear is racing the set",
+                    evf, bits, thread, flags_after);
+        }
+    }
     if (op == 0 && thread > 0) {
         const std::lock_guard<std::mutex> lock(evf_setters_mutex);
         evf_setters[evf].insert(thread);
@@ -594,7 +607,8 @@ SceInt32 simple_event_clear(KernelState &kernel, const char *export_name, SceUID
 
     const std::lock_guard<std::mutex> event_lock(event->mutex);
 
-    event->pattern &= clear_pattern;
+    // Same inversion as sceKernelClearEventFlag: clear_pattern names the bits to drop.
+    event->pattern &= ~clear_pattern;
 
     return SCE_KERNEL_OK;
 }
@@ -2211,7 +2225,13 @@ SceUID eventflag_clear(KernelState &kernel, const char *export_name, SceUID evfI
 
     const std::lock_guard<std::mutex> event_lock(event->mutex);
 
-    event->flags &= bitPattern;
+    // sceKernelClearEventFlag(evf, pattern) CLEARS the bits named by pattern. Keeping
+    // `flags &= pattern` (the upstream spelling) inverts the meaning of every call: a guest
+    // doing clear(0x8) to acknowledge bit 3 would drop every other bit instead and leave bit 3
+    // set forever, so the next waiter for bit 3 blocks on a flag nobody will raise again.
+    // log_eventflag_history() reported exactly that shape ("bit 7 was set 1068x, last 3 ms
+    // ago, waiter still blocked on 0x80") on EDF's loading stall.
+    event->flags &= ~bitPattern;
     evf_record(evfId, 0, 1, bitPattern, event->flags, 0);
 
     return SCE_KERNEL_OK;
@@ -2514,7 +2534,7 @@ void KernelState::log_eventflag_history() {
             LOG_ERROR("HANG EVF VERDICT: tid {} '{}' wants 0x{:X} -> {}", w.thread ? w.thread->id : -1,
                 w.thread ? w.thread->name : std::string("?"), f,
                 never ? fmt::format("UNSATISFIABLE, bit(s) 0x{:X} were never set by anyone", never)
-                      : std::string("its bits were set before, so the producer either stopped or its wake was consumed by another waiter"));
+                      : std::string("bits raised, waiter still blocked: check whether a CLEAR took them away between the raise and the wake (inverted sceKernelClearEventFlag, or a WAITCLEAR waiter wiping the whole flag)"));
         }
     }
     // Who has EVER set each flag. This is the missing half of the deadlock question: a waiter
@@ -2539,6 +2559,9 @@ void KernelState::log_eventflag_history() {
     std::string hist;
     // Collapse runs of identical (evf, op, tid, bits) into one line plus a repeat count. Without
     // this a two-thread ping-pong buries everything else under hundreds of identical lines.
+    // flags_after is part of the key: run collapsing that ignored it reported "bits=0x8
+    // after=0x2" for 11538 raises, throwing away the one fact that identified the inverted
+    // clear (the flag going DOWN on a SET).
     uint32_t run = 0;
     EvfOp prev{};
     const auto flush_run = [&]() {
@@ -2551,7 +2574,7 @@ void KernelState::log_eventflag_history() {
     };
     for (uint64_t k = next - count; k < next; k++) {
         const EvfOp &e = evf_ring[k % EVF_RING_SIZE];
-        if (run > 0 && e.op == prev.op && e.evf == prev.evf && e.thread == prev.thread && e.bits == prev.bits) {
+        if (run > 0 && e.op == prev.op && e.evf == prev.evf && e.thread == prev.thread && e.bits == prev.bits && e.flags_after == prev.flags_after) {
             prev = e; // keep the newest timestamp / flags snapshot for the collapsed run
             run++;
             continue;
@@ -2703,14 +2726,14 @@ SceInt32 eventflag_set(KernelState &kernel, const char *export_name, SceUID thre
                     *waiting_thread_data.outBits = event->flags;
                 }
 
-                if (waiting_thread_data.wait & SCE_EVENT_WAITCLEAR) {
-                    event->flags = 0;
-                }
-
-                if (waiting_thread_data.wait & SCE_EVENT_WAITCLEAR_PAT) {
-                    event->flags &= ~waiting_flags;
-                }
-
+                // Only the waiter whose pattern is actually satisfied may clear it, and only
+                // for itself. The upstream code also let a waiter with WAITCLEAR wipe the whole
+                // flag (event->flags = 0) in the middle of this loop, which throws away the bits
+                // every remaining waiter was still waiting for - the rest of the queue then sees
+                // a zeroed flag and blocks forever. A real raise-a-waiting-thread never clears
+                // anything on the producer's side; clearing belongs to the consumer in
+                // eventflag_waitorpoll(). That distinction is what the loading stall showed:
+                // "bit 3 set 11538x, last 3 ms ago, waiter still blocked on 0x8".
                 const std::lock_guard<std::mutex> waiting_thread_lock(waiting_thread->mutex);
 
                 waiting_thread->update_status(ThreadStatus::run, ThreadStatus::wait);
