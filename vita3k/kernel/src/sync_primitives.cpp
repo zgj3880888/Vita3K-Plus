@@ -79,12 +79,14 @@ static SceInt32 preempt_user_cores(const SceInt32 affinity) {
     return cores ? cores : SCE_KERNEL_CPU_MASK_USER_ALL;
 }
 
-static int preempt_core_count(const SceInt32 affinity) {
+// Exported for thread_state.h: preempt_after_wake() in thread.cpp measures how many guest threads
+// preempt-on-wake left runnable, using the same core mask this file acquires on.
+int preempt_core_count(const SceInt32 affinity) {
     const SceInt32 cores = preempt_user_cores(affinity);
     return ((cores & 0x10000) != 0) + ((cores & 0x20000) != 0) + ((cores & 0x40000) != 0);
 }
 
-static std::vector<ThreadStatePtr> preempt_runnable_threads(KernelState &kernel, const ThreadState *caller) {
+std::vector<ThreadStatePtr> preempt_runnable_threads(KernelState &kernel, const ThreadState *caller) {
     std::vector<ThreadStatePtr> threads;
     {
         const std::lock_guard<std::mutex> lock(kernel.mutex);
