@@ -450,6 +450,20 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
             // deferred-unmap collapses remaps WITHOUT world-stops, blinding the veto above; transitions are stamped regardless
             const bool mem_transition_quiet = !emuenv.renderer
                 || (now_epoch_ms - emuenv.renderer->last_mem_transition_epoch_ms.load(std::memory_order_relaxed)) >= 5000;
+            // v1.1 nightly (bbcbbd55) parity for titles that never get past their loading screen.
+            // The two extra quiet-windows below were added after the nightly: a title that is still
+            // streaming world-stops AND spawning threads can never satisfy them, so its cycle breaker
+            // is muted for the entire load. The nightly had neither, and reached the first flip ~4 s in.
+            const bool nightly_breaker_parity = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
+            const bool breaker_transition_veto = mem_transition_quiet || nightly_breaker_parity;
+            const bool breaker_spawn_veto = !guest_creating_threads || nightly_breaker_parity;
+            {
+                static bool parity_announced = false;
+                if (nightly_breaker_parity && !parity_announced) {
+                    parity_announced = true;
+                    LOG_INFO("HANG WATCHDOG: nightly breaker parity ON for {} - the memory-transition and thread-spawn quiet-windows no longer mute the cycle breaker (the v1.1 nightly bbcbbd55 had neither)", emuenv.io.title_id);
+                }
+            }
             // ten seconds of steady frames ends a wedge the cycle breaker handed to the stall breaker
             if (stall_vblanks > FLIP_STREAK_MAX_GAP_VBLANKS)
                 flip_streak_start_vblank = ~0ull;
@@ -463,7 +477,7 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
                 last_provable_dryrun_setframe = setframe;
                 emuenv.kernel.try_break_provable_evf_cycle(true);
             }
-            if (!never_flipped && stall_vblanks > PROVABLE_BREAK_VBLANKS && unpaused && renderer_idle_vblanks > PROVABLE_BREAK_VBLANKS && world_stop_quiet && mem_transition_quiet && !guest_creating_threads && last_provable_break_setframe != setframe) {
+            if (!never_flipped && stall_vblanks > PROVABLE_BREAK_VBLANKS && unpaused && renderer_idle_vblanks > PROVABLE_BREAK_VBLANKS && world_stop_quiet && breaker_transition_veto && breaker_spawn_veto && last_provable_break_setframe != setframe) {
 #ifdef _WIN32
                 // if (!IsDebuggerPresent())  // Debug speed can make a normal load look exactly like a wedge hang
 #endif
@@ -498,7 +512,7 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
                 const bool partial_wedge = stall_vblanks > BREAK_SLOW_VBLANKS && renderer_idle_vblanks > BREAK_SLOW_VBLANKS;
                 if (!full_wedge && !partial_wedge) {
                     LOG_INFO("HANG WATCHDOG: no flip for {} vblanks but still alive (renderer executed a command {} vblanks ago, a guest thread woke {} vblanks ago) — breaker suppressed", stall_vblanks, renderer_idle_vblanks, guest_idle_vblanks);
-                } else if (guest_creating_threads) {
+                } else if (!breaker_spawn_veto) {
                     LOG_INFO("HANG WATCHDOG: no flip for {} vblanks, renderer idle {}, but the guest created a thread {} vblanks ago — loading, breakers held", stall_vblanks, renderer_idle_vblanks, create_idle_vblanks);
                 } else {
                     constexpr int MAX_BREAK_DUMPS_PER_STALL = 3;

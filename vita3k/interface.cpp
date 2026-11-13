@@ -567,8 +567,8 @@ static ExitCode load_app_impl(SceUID &main_module_id, EmuEnvState &emuenv, const
     // them together, not just the lock: turning off the lock alone still leaves the gate limiting
     // the guest to cfg.guest_cores runnable threads, which is a different machine from the one the
     // game was known to boot on.
-    const bool title_use_nightly_scheduling = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
-    const bool title_disable_core_lock = title_use_nightly_scheduling;
+    const bool title_use_nightly_scheduling = false; // rolled back: the nightly-scheduling hypothesis was disproved in testing
+    const bool title_disable_core_lock = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
     emuenv.kernel.accurate_thread_scheduling = emuenv.cfg.current_config.accurate_thread_scheduling;
     emuenv.kernel.preempt_on_wake = emuenv.cfg.current_config.accurate_thread_scheduling;
     emuenv.kernel.preempt_on_wake_us = emuenv.cfg.current_config.preempt_on_wake_us;
