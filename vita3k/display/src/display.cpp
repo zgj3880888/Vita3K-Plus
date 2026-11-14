@@ -442,7 +442,13 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
 
             // Cycle breaker
             constexpr uint64_t PROVABLE_DRYRUN_VBLANKS = 120;
-            constexpr uint64_t PROVABLE_BREAK_VBLANKS = 300;
+            constexpr uint64_t PROVABLE_BREAK_VBLANKS_STOCK = 300;
+            // The v1.1 nightly (bbcbbd55) waited a full 900 vblanks (15 s) before forcing event flags.
+            // A title that is merely SLOW - 2 fps while it grinds through pipeline/shader work - walks
+            // itself out of that state well inside the window. Forcing flags at 5 s instead destroys
+            // its sync state permanently: it never flips again, only re-dumps. That is the single
+            // behavioural difference between the nightly's provable-cycle breaker and this one.
+            constexpr uint64_t PROVABLE_BREAK_VBLANKS_NIGHTLY = 900;
             constexpr uint64_t PROVABLE_RECOVERY_VBLANKS = 600;
             constexpr uint64_t FLIP_STREAK_MAX_GAP_VBLANKS = 30;
             const int64_t now_epoch_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -457,11 +463,13 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
             const bool nightly_breaker_parity = emuenv.io.title_id == "PCSB00239" || emuenv.io.title_id == "PCSE00209";
             const bool breaker_transition_veto = mem_transition_quiet || nightly_breaker_parity;
             const bool breaker_spawn_veto = !guest_creating_threads || nightly_breaker_parity;
+            // Full parity with the nightly's provable-cycle breaker: same 900-vblank patience.
+            const uint64_t PROVABLE_BREAK_VBLANKS = nightly_breaker_parity ? PROVABLE_BREAK_VBLANKS_NIGHTLY : PROVABLE_BREAK_VBLANKS_STOCK;
             {
                 static bool parity_announced = false;
                 if (nightly_breaker_parity && !parity_announced) {
                     parity_announced = true;
-                    LOG_INFO("HANG WATCHDOG: nightly breaker parity ON for {} - the memory-transition and thread-spawn quiet-windows no longer mute the cycle breaker (the v1.1 nightly bbcbbd55 had neither)", emuenv.io.title_id);
+                    LOG_INFO("HANG WATCHDOG: nightly breaker parity ON for {} - the memory-transition and thread-spawn quiet-windows no longer mute the cycle breaker, the break waits {} vblanks instead of {} (the v1.1 nightly bbcbbd55 had neither quiet-window and waited 900)", emuenv.io.title_id, PROVABLE_BREAK_VBLANKS, PROVABLE_BREAK_VBLANKS_STOCK);
                 }
             }
             // ten seconds of steady frames ends a wedge the cycle breaker handed to the stall breaker
@@ -483,7 +491,8 @@ static void vblank_sync_thread(EmuEnvState &emuenv) {
 #endif
                 {
                     // a game that wedges again within 10s of a release was not recovered and each frame it draws restarts the stall breaker's 15 s clock
-                    if (!provable_handed_over && last_provable_break_vblank != 0 && setframe >= last_provable_break_vblank && setframe - last_provable_break_vblank < PROVABLE_RECOVERY_VBLANKS) {
+                    // the nightly had no give-up rule at all: it kept re-arming and kept breaking, which is how it climbed out
+                    if (!nightly_breaker_parity && !provable_handed_over && last_provable_break_vblank != 0 && setframe >= last_provable_break_vblank && setframe - last_provable_break_vblank < PROVABLE_RECOVERY_VBLANKS) {
                         provable_handed_over = true;
                         LOG_ERROR("HANG WATCHDOG: the game wedged again {} vblanks after the last provable-cycle release, leaving this wedge to the stall breaker", setframe - last_provable_break_vblank);
                     }
